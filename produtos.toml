@@ -1,0 +1,31 @@
+# Catálogo de produtos personalizados.
+#
+# Cada produto descreve a área visível da estampa (largura_cm x altura_cm).
+# A peça impressa ganha `margem_cm` de cada lado: é a margem de segurança e
+# costura, que fica em branco, com borda preta no limite externo e o código
+# do pedido escrito nela. A arte do cliente fica somente dentro da área visível.
+#
+# Ex.: almofada 45x45 + 1 cm de cada lado = peça de 47x47.
+
+[geral]
+dpi = 150                 # resolução mínima desejada para a arte no tamanho final
+largura_rolo_cm = 180     # área útil de impressão das impressoras
+espaco_entre_pecas_cm = 0.5
+comprimento_max_cm = 300  # cada arquivo de lote é dividido nesse comprimento
+borda_mm = 1.0            # espessura da borda preta (linha de corte)
+
+[produtos.almofada-45]
+nome = "Almofada 45x45"
+largura_cm = 45
+altura_cm = 45
+margem_cm = 1
+lados = 2                 # aceita frente e verso
+espelhar = false
+
+[produtos.travesseiro-40x70]
+nome = "Capa de travesseiro 40x70"
+largura_cm = 40
+altura_cm = 70
+margem_cm = 1
+lados = 2
+espelhar = false
