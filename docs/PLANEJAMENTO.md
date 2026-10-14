@@ -16,14 +16,18 @@ Problemas a resolver:
 
 ## Padrões de produção (definidos com a operação)
 
-- Impressoras com **área útil de 1,80 m**, rolos de 300 a 500 m.
+- Duas impressoras com **área útil de 1,80 m**, rolos de 300 a 500 m.
+- O **RIP faz o espelhamento e o aproveitamento do rolo**: o sistema entrega
+  um arquivo por peça (espelhar fica como opção).
+- Volume: **mais de 1000 almofadas por dia** — geração em paralelo é requisito.
 - Peça = estampa + **1 cm de margem de cada lado** (segurança e costura).
   A arte fica **somente dentro** da área visível; a margem é branca, com
   **borda preta** no limite externo e o **código do pedido** escrito nela.
   - Almofada 45×45 → peça 47×47
   - Capa de travesseiro 40×70 → peça 42×72
+  - Capa de porta: sob medida, de 0,70 × 2,00 m a 1,50 × 3,00 m
+  - Fachadas: sob medida
 - Saída em **PDF ou PNG**, cores sempre em **RGB** (sRGB).
-- Espelhamento: configurável por produto (hoje desligado — confirmar se o RIP já espelha).
 
 ## Ideia central: template com áreas de arte
 
@@ -81,8 +85,9 @@ tratada, lado) · Peça / arquivo de produção · Lote (rolo) · Template de mo
 ## Fases
 
 1. **Gerador de arquivos de produção** ✅ *(este repositório, `estampa`)*:
-   catálogo de produtos, tratamento de cor, enquadramento, aviso de
-   resolução, ampliação por IA opcional, peça em PNG/PDF e lote no rolo de 1,80 m.
+   catálogo de produtos (fixos e sob medida), tratamento de cor,
+   enquadramento, aviso de resolução, ampliação por IA opcional, um arquivo
+   por peça para o RIP (PNG/JPG/PDF) em paralelo e montagem opcional no rolo.
 2. **Fila de pedidos**: importar a planilha do UpSeller, mapear SKU → produto,
    tela web para recortar/aprovar a arte, gerar lotes.
 3. **Mockups**: (a) 3D com Three.js para almofada e travesseiro — imagens em
@@ -96,9 +101,11 @@ o modelo de produto já prevê outros processos.
 
 ## Pendências
 
-- Espelhamento: o RIP já espelha ou o arquivo deve sair espelhado?
-- Qual RIP é usado (para a pasta monitorada)?
-- Volume diário de pedidos personalizados.
-- Capa de porta e demais produtos: medidas e margens.
-- Os pedidos devem ficar agrupados no rolo (corte/costura por pedido) ou
-  vale só o melhor aproveitamento?
+- Qual RIP é usado e se ele aceita PNG/JPG direto na pasta monitorada.
+- Margens da capa de porta e da fachada (hoje 1 cm, como as almofadas) e se
+  fachada leva bainha/ilhós.
+- Fachadas com os dois lados acima de 1,80 m: emenda feita pelo RIP
+  (painéis) ou o sistema deve dividir a arte com sobreposição?
+- Resolução para peças grandes (hoje 100 DPI para porta e fachada).
+- Com 1000+ peças/dia, a etapa de conferência humana vira o gargalo: a tela
+  de aprovação da Fase 2 precisa ser em grade, com aprovação em massa.

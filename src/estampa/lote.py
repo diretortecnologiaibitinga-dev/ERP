@@ -1,21 +1,25 @@
-"""Lote de impressão: monta as peças dos pedidos no rolo de 1,80 m.
+"""Lote de impressão a partir de uma planilha de pedidos.
 
-O encaixe usa prateleiras (linhas): as peças mais altas abrem as linhas e as
-menores aproveitam as sobras. Cada produto é girado ou não conforme cabe
+O padrão é exportar um arquivo por peça para a pasta do RIP, que faz o
+aproveitamento do rolo. Opcionalmente, `encaixar` monta as peças no rolo de
+1,80 m por prateleiras (linhas): as peças mais altas abrem as linhas e as
+menores aproveitam as sobras; cada produto é girado ou não conforme cabe
 mais área útil por linha (ex.: capa 42x72 em pé cabe 4 por linha).
 """
 
 from __future__ import annotations
 
 import csv
+import os
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from reportlab.lib.units import cm
 from reportlab.pdfgen.canvas import Canvas
 
-from .imagem import Ampliador, ArtePreparada, preparar_arte
-from .peca import Peca, desenhar_pdf
+from .imagem import Ampliador, ArtePreparada, criar_ampliador, preparar_arte
+from .peca import Peca, desenhar_pdf, nome_arquivo, salvar_imagem, salvar_pdf
 from .produtos import Catalogo, Produto
 
 
@@ -112,8 +116,14 @@ class ItemPedido:
     arte_verso: Path | None = None
 
 
+def _medida(valor: str | None) -> float | None:
+    valor = (valor or "").strip().replace(",", ".")
+    return float(valor) if valor else None
+
+
 def ler_pedidos_csv(caminho: Path | str, catalogo: Catalogo) -> list[ItemPedido]:
-    """CSV com colunas: pedido, produto, quantidade, arte_frente, arte_verso.
+    """CSV com colunas: pedido, produto, quantidade, arte_frente, arte_verso
+    e, para produtos sob medida, largura_cm e altura_cm da estampa.
 
     Caminhos de arte relativos são resolvidos a partir da pasta do CSV.
     """
@@ -121,10 +131,20 @@ def ler_pedidos_csv(caminho: Path | str, catalogo: Catalogo) -> list[ItemPedido]
     itens = []
     with open(caminho, newline="", encoding="utf-8-sig") as f:
         for n, linha in enumerate(csv.DictReader(f), start=2):
-            produto = catalogo.produto(linha["produto"].strip())
-            verso = (linha.get("arte_verso") or "").strip()
-            if verso and produto.lados < 2:
-                raise ValueError(f"linha {n}: {produto.nome} não aceita verso")
+            try:
+                produto = catalogo.produto(linha["produto"].strip())
+                largura, altura = _medida(linha.get("largura_cm")), _medida(linha.get("altura_cm"))
+                if produto.sob_medida:
+                    if largura is None or altura is None:
+                        raise ValueError(f"{produto.nome} é sob medida: informe largura_cm e altura_cm")
+                    produto = produto.com_medidas(largura, altura)
+                elif largura is not None or altura is not None:
+                    raise ValueError(f"{produto.nome} tem medida fixa; deixe largura_cm e altura_cm vazias")
+                verso = (linha.get("arte_verso") or "").strip()
+                if verso and produto.lados < 2:
+                    raise ValueError(f"{produto.nome} não aceita verso")
+            except (KeyError, ValueError) as e:
+                raise ValueError(f"linha {n}: {e.args[0]}") from None
             itens.append(ItemPedido(
                 pedido=linha["pedido"].strip(),
                 produto=produto,
@@ -135,20 +155,30 @@ def ler_pedidos_csv(caminho: Path | str, catalogo: Catalogo) -> list[ItemPedido]
     return itens
 
 
+def dpi_do_produto(produto: Produto, padrao: int, forcado: int | None = None) -> int:
+    """Prioridade: DPI pedido na hora > DPI do produto > DPI geral."""
+    return forcado or produto.dpi or padrao
+
+
 def gerar_pecas(itens: list[ItemPedido], dpi: int, ampliador: Ampliador | None = None,
-                espelhar: bool | None = None) -> tuple[list[Peca], list[str]]:
-    """Expande cada item em peças (cópias x lados). Retorna também avisos."""
+                espelhar: bool | None = None, dpi_forcado: int | None = None) -> tuple[list[Peca], list[str]]:
+    """Expande cada item em peças (cópias x lados). Retorna também avisos.
+
+    `dpi` é o padrão geral; produtos com DPI próprio (peças grandes) usam o
+    seu, a não ser que `dpi_forcado` seja informado.
+    """
     cache: dict[tuple[Path, str], ArtePreparada] = {}
     avisos: list[str] = []
 
     def arte(caminho: Path, produto: Produto, pedido: str) -> ArtePreparada:
         chave = (caminho, produto.codigo)
         if chave not in cache:
-            cache[chave] = preparar_arte(caminho, produto.largura_cm, produto.altura_cm, dpi, ampliador)
-            if cache[chave].dpi_original < dpi:
+            alvo = dpi_do_produto(produto, dpi, dpi_forcado)
+            cache[chave] = preparar_arte(caminho, produto.largura_cm, produto.altura_cm, alvo, ampliador)
+            if cache[chave].dpi_original < alvo:
                 avisos.append(
                     f"pedido {pedido}: {caminho.name} tem {cache[chave].dpi_original:.0f} DPI "
-                    f"no tamanho final (alvo {dpi})"
+                    f"no tamanho final (alvo {alvo})"
                 )
         return cache[chave]
 
@@ -168,3 +198,52 @@ def gerar_pecas(itens: list[ItemPedido], dpi: int, ampliador: Ampliador | None =
                     espelhar=espelhar,
                 ))
     return pecas, avisos
+
+
+@dataclass(frozen=True)
+class OpcoesExportacao:
+    saida: Path
+    formato: str = "png"      # png | jpg | pdf
+    dpi: int = 150                # DPI geral do catálogo
+    dpi_forcado: int | None = None
+    borda_mm: float = 1.0
+    ampliador: str = "lanczos"
+    espelhar: bool | None = None
+
+
+@dataclass
+class ResultadoItem:
+    pedido: str
+    arquivos: list[Path] = field(default_factory=list)
+    avisos: list[str] = field(default_factory=list)
+    erro: str | None = None
+
+
+def exportar_item(item: ItemPedido, op: OpcoesExportacao) -> ResultadoItem:
+    """Gera os arquivos de um item. Roda em processo separado, então um
+    arquivo de arte com problema não derruba o lote inteiro."""
+    resultado = ResultadoItem(item.pedido)
+    try:
+        pecas, resultado.avisos = gerar_pecas([item], op.dpi, criar_ampliador(op.ampliador), op.espelhar, op.dpi_forcado)
+        for peca in pecas:
+            destino = op.saida / f"{nome_arquivo(peca)}.{op.formato}"
+            if op.formato == "pdf":
+                salvar_pdf(peca, destino, op.borda_mm)
+            else:
+                salvar_imagem(peca, destino, dpi_do_produto(peca.produto, op.dpi, op.dpi_forcado), op.borda_mm)
+            resultado.arquivos.append(destino)
+    except Exception as e:  # noqa: BLE001 — o erro vai para o relatório do lote
+        resultado.erro = f"{type(e).__name__}: {e}"
+    return resultado
+
+
+def exportar_itens(itens: list[ItemPedido], op: OpcoesExportacao, processos: int | None = None):
+    """Exporta os itens em paralelo, devolvendo os resultados conforme ficam prontos."""
+    op.saida.mkdir(parents=True, exist_ok=True)
+    processos = processos or os.cpu_count() or 1
+    if processos == 1:
+        for item in itens:
+            yield exportar_item(item, op)
+        return
+    with ProcessPoolExecutor(max_workers=processos) as pool:
+        yield from pool.map(exportar_item, itens, [op] * len(itens))

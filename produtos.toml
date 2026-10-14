@@ -29,3 +29,22 @@ altura_cm = 70
 margem_cm = 1
 lados = 2
 espelhar = false
+
+# Produtos sob medida: largura e altura (em cm) vêm de cada pedido.
+# Margens a confirmar com a produção.
+
+[produtos.capa-porta]
+nome = "Capa de porta"
+sob_medida = true
+margem_cm = 1
+lados = 1
+dpi = 100                 # peças de até 1,50 x 3,00 m
+largura_max_cm = 150
+altura_max_cm = 300
+
+[produtos.fachada]
+nome = "Fachada"
+sob_medida = true
+margem_cm = 1
+lados = 1
+dpi = 100

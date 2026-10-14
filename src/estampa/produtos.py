@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 def _catalogo_padrao() -> Path:
@@ -19,11 +19,34 @@ CATALOGO_PADRAO = _catalogo_padrao()
 class Produto:
     codigo: str
     nome: str
-    largura_cm: float
-    altura_cm: float
+    largura_cm: float = 0
+    altura_cm: float = 0
     margem_cm: float = 1.0
     lados: int = 1
     espelhar: bool = False
+    sob_medida: bool = False      # medidas vêm de cada pedido
+    dpi: int | None = None        # sobrepõe o DPI geral (peças grandes)
+    largura_max_cm: float | None = None
+    altura_max_cm: float | None = None
+
+    def com_medidas(self, largura_cm: float, altura_cm: float) -> Produto:
+        """Produto sob medida com as dimensões de um pedido específico."""
+        if not self.sob_medida:
+            raise ValueError(f"{self.nome} tem medida fixa ({self.largura_cm:g}x{self.altura_cm:g} cm)")
+        if largura_cm <= 0 or altura_cm <= 0:
+            raise ValueError(f"{self.nome}: medidas inválidas {largura_cm:g}x{altura_cm:g}")
+        for valor, limite, eixo in ((largura_cm, self.largura_max_cm, "largura"),
+                                    (altura_cm, self.altura_max_cm, "altura")):
+            if limite and valor > limite:
+                raise ValueError(f"{self.nome}: {eixo} {valor:g} cm acima do máximo de {limite:g} cm")
+        return replace(
+            self,
+            codigo=f"{self.codigo}-{largura_cm:g}x{altura_cm:g}",
+            nome=f"{self.nome} {largura_cm:g}x{altura_cm:g}",
+            largura_cm=largura_cm,
+            altura_cm=altura_cm,
+            sob_medida=False,
+        )
 
     @property
     def largura_total_cm(self) -> float:

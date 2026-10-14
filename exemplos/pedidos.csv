@@ -1,4 +1,5 @@
-pedido,produto,quantidade,arte_frente,arte_verso
-250101ABC,almofada-45,2,gato.jpg,flores.jpg
-250102XYZ,travesseiro-40x70,3,flores.jpg,
-250103QWE,almofada-45,1,gato.jpg,
+pedido,produto,quantidade,arte_frente,arte_verso,largura_cm,altura_cm
+250101ABC,almofada-45,2,gato.jpg,flores.jpg,,
+250102XYZ,travesseiro-40x70,3,flores.jpg,,,
+250103QWE,almofada-45,1,gato.jpg,,,
+250104POR,capa-porta,1,flores.jpg,,70,200

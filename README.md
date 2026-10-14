@@ -11,13 +11,19 @@ feito no Corel:
 - **código do pedido** na margem branca, com FRENTE/VERSO e cópia (ex.: `2/3`);
 - cores sempre em **sRGB** (converte CMYK, Adobe RGB etc.; corrige a rotação de fotos de celular);
 - aviso quando a arte tem resolução baixa para o tamanho final;
-- **lote**: monta as peças de vários pedidos no rolo de **1,80 m**, em PDF no tamanho real,
-  girando cada produto para caber mais por linha e dividindo em arquivos de até 3 m.
+- **lote**: gera **um arquivo por peça** para a pasta do RIP (que faz o
+  aproveitamento do rolo), em paralelo — ~1000 almofadas em poucos minutos;
+  um item com problema não para o lote e aparece no relatório;
+- produtos **sob medida** (capa de porta, fachada) com a medida vinda do pedido;
+- **sem espelhamento** por padrão (o RIP espelha); `--espelhar` quando precisar;
+- opcional `--montar-rolo`: monta as peças no rolo de 1,80 m em PDF no tamanho real.
 
 | Produto | Estampa | Peça impressa |
 |---|---|---|
 | `almofada-45` | 45 × 45 cm | 47 × 47 cm |
 | `travesseiro-40x70` | 40 × 70 cm | 42 × 72 cm |
+| `capa-porta` | sob medida, até 150 × 300 cm (100 DPI) | + 1 cm de cada lado |
+| `fachada` | sob medida (100 DPI) | + 1 cm de cada lado |
 
 Novos produtos e parâmetros (DPI, largura do rolo, espaçamento, espessura da
 borda, espelhamento) ficam em [`produtos.toml`](produtos.toml).
@@ -37,16 +43,28 @@ estampa produtos
 estampa peca --produto almofada-45 --pedido 250101ABC \
   --frente gato.jpg --verso flores.jpg --quantidade 2 --saida saida/
 
-# vários pedidos montados no rolo (PDF)
-estampa lote exemplos/pedidos.csv --saida saida/
+# sob medida: largura x altura da estampa em cm
+estampa peca --produto capa-porta --largura 70 --altura 200 --pedido 250104 --frente porta.jpg
+
+# todos os pedidos da planilha: um arquivo por peça na pasta do RIP
+estampa lote exemplos/pedidos.csv --saida /caminho/da/pasta-do-rip
+estampa lote exemplos/pedidos.csv --formato jpg      # ~3x mais rápido e leve
+
+# alternativa: peças já encaixadas no rolo de 1,80 m (PDF)
+estampa lote exemplos/pedidos.csv --montar-rolo --saida lotes/
 ```
 
-Formato do CSV (caminhos relativos à pasta do CSV; `arte_verso` vazio = só frente):
+Os arquivos começam pelo produto, para a fila do RIP ficar agrupada:
+`almofada-45_250101ABC_frente_1de2.png`.
+
+Formato do CSV (caminhos relativos à pasta do CSV; `arte_verso` vazio = só
+frente; `largura_cm`/`altura_cm` só para produtos sob medida, aceita vírgula):
 
 ```csv
-pedido,produto,quantidade,arte_frente,arte_verso
-250101ABC,almofada-45,2,gato.jpg,flores.jpg
-250102XYZ,travesseiro-40x70,3,flores.jpg,
+pedido,produto,quantidade,arte_frente,arte_verso,largura_cm,altura_cm
+250101ABC,almofada-45,2,gato.jpg,flores.jpg,,
+250102XYZ,travesseiro-40x70,3,flores.jpg,,,
+250104POR,capa-porta,1,flores.jpg,,70,200
 ```
 
 ### Ampliação por IA

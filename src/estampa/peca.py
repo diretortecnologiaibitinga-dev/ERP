@@ -61,33 +61,60 @@ class Peca:
         return self.produto.margem_cm * 0.45
 
 
+def _base_png(peca: Peca, dpi: int, borda_mm: float) -> Image.Image:
+    """Peça sem a etiqueta. Fica guardada na arte: as cópias e o mesmo lado
+    repetido só reescrevem o texto, o que pesa em lotes de centenas de peças."""
+    cache = peca.arte.__dict__.setdefault("_bases", {})
+    chave = (peca.produto.codigo, dpi, borda_mm)
+    if chave not in cache:
+        p = peca.produto
+        w, h = cm_para_px(peca.largura_cm, dpi), cm_para_px(peca.altura_cm, dpi)
+        m = cm_para_px(p.margem_cm, dpi)
+        img = Image.new("RGB", (w, h), "white")
+        arte = peca.arte.imagem
+        alvo = (w - 2 * m, h - 2 * m)
+        if arte.size != alvo:
+            arte = arte.resize(alvo, Image.Resampling.LANCZOS)
+        img.paste(arte, (m, m))
+        borda = max(1, cm_para_px(borda_mm / 10, dpi))
+        ImageDraw.Draw(img).rectangle((0, 0, w - 1, h - 1), outline="black", width=borda)
+        cache[chave] = img
+    return cache[chave]
+
+
 def renderizar_png(peca: Peca, dpi: int, borda_mm: float) -> Image.Image:
-    p = peca.produto
-    w, h = cm_para_px(peca.largura_cm, dpi), cm_para_px(peca.altura_cm, dpi)
-    m = cm_para_px(p.margem_cm, dpi)
-    img = Image.new("RGB", (w, h), "white")
-
-    arte = peca.arte.imagem
-    alvo = (w - 2 * m, h - 2 * m)
-    if arte.size != alvo:
-        arte = arte.resize(alvo, Image.Resampling.LANCZOS)
-    img.paste(arte, (m, m))
-
-    draw = ImageDraw.Draw(img)
-    borda = max(1, cm_para_px(borda_mm / 10, dpi))
-    draw.rectangle((0, 0, w - 1, h - 1), outline="black", width=borda)
-
+    img = _base_png(peca, dpi, borda_mm).copy()
+    m = cm_para_px(peca.produto.margem_cm, dpi)
     tamanho = max(8, cm_para_px(peca.tamanho_fonte_cm, dpi))
     fonte = ImageFont.truetype(str(FONTE_TTF), tamanho) if FONTE_TTF.exists() else ImageFont.load_default(tamanho)
-    draw.text((w / 2, h - m / 2), peca.etiqueta, fill="black", font=fonte, anchor="mm")
-
+    ImageDraw.Draw(img).text((img.width / 2, img.height - m / 2), peca.etiqueta,
+                             fill="black", font=fonte, anchor="mm")
     if peca.deve_espelhar:
         img = ImageOps.mirror(img)
     return img
 
 
-def salvar_png(peca: Peca, destino: Path | str, dpi: int, borda_mm: float) -> None:
-    renderizar_png(peca, dpi, borda_mm).save(destino, dpi=(dpi, dpi), icc_profile=SRGB_ICC)
+def nome_arquivo(peca: Peca) -> str:
+    """Nome começando pelo produto, para o RIP agrupar a fila por produto."""
+    nome = f"{peca.produto.codigo}_{peca.pedido}"
+    if peca.frente_verso:
+        nome += f"_{('frente', 'verso')[peca.lado]}"
+    if peca.total_copias > 1:
+        nome += f"_{peca.copia}de{peca.total_copias}"
+    return nome
+
+
+def salvar_imagem(peca: Peca, destino: Path | str, dpi: int, borda_mm: float) -> None:
+    """Salva em PNG (sem perdas) ou JPG, conforme a extensão do destino.
+
+    PNG usa compressão rápida: no nível padrão do zlib uma almofada a 150 DPI
+    leva ~4x mais tempo para salvar, com arquivo só um pouco menor.
+    """
+    img = renderizar_png(peca, dpi, borda_mm)
+    if str(destino).lower().endswith((".jpg", ".jpeg")):
+        img.save(destino, "JPEG", quality=95, subsampling=0, dpi=(dpi, dpi), icc_profile=SRGB_ICC)
+    else:
+        img.save(destino, "PNG", compress_level=1, dpi=(dpi, dpi), icc_profile=SRGB_ICC)
 
 
 def desenhar_pdf(c: Canvas, peca: Peca, x_cm: float, y_cm: float, rotacionar: bool, borda_mm: float) -> None:
