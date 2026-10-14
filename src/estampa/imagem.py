@@ -6,7 +6,7 @@ import io
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 
@@ -110,6 +110,7 @@ def criar_ampliador(nome: str) -> Ampliador:
 class ArtePreparada:
     imagem: Image.Image
     dpi_original: float  # DPI que a arte do cliente teria no tamanho final
+    avisos: list[str] = field(default_factory=list)
 
     @property
     def baixa_resolucao(self) -> bool:
@@ -123,6 +124,26 @@ class ArtePreparada:
         return buf.getvalue()
 
 
+def preparar_imagem(
+    img: Image.Image,
+    largura_cm: float,
+    altura_cm: float,
+    dpi: int,
+    ampliador: Ampliador | None = None,
+    dpi_original: float | None = None,
+) -> ArtePreparada:
+    """Deixa uma imagem RGB pronta para a área visível: enquadrada e no
+    tamanho exato em pixels para o DPI de produção."""
+    img = enquadrar(img, largura_cm / altura_cm)
+    original = dpi_efetivo(img, largura_cm) if dpi_original is None else dpi_original
+    alvo = (cm_para_px(largura_cm, dpi), cm_para_px(altura_cm, dpi))
+    if ampliador and img.width < alvo[0]:
+        img = ampliador.ampliar(img, alvo[0] / img.width)
+    if img.size != alvo:
+        img = img.resize(alvo, Image.Resampling.LANCZOS)
+    return ArtePreparada(imagem=img, dpi_original=original)
+
+
 def preparar_arte(
     caminho: Path | str,
     largura_cm: float,
@@ -130,13 +151,4 @@ def preparar_arte(
     dpi: int,
     ampliador: Ampliador | None = None,
 ) -> ArtePreparada:
-    """Deixa a arte pronta para a área visível: sRGB, enquadrada e no
-    tamanho exato em pixels para o DPI de produção."""
-    img = enquadrar(carregar_rgb(caminho), largura_cm / altura_cm)
-    original = dpi_efetivo(img, largura_cm)
-    alvo = (cm_para_px(largura_cm, dpi), cm_para_px(altura_cm, dpi))
-    if ampliador and img.width < alvo[0]:
-        img = ampliador.ampliar(img, alvo[0] / img.width)
-    if img.size != alvo:
-        img = img.resize(alvo, Image.Resampling.LANCZOS)
-    return ArtePreparada(imagem=img, dpi_original=original)
+    return preparar_imagem(carregar_rgb(caminho), largura_cm, altura_cm, dpi, ampliador)

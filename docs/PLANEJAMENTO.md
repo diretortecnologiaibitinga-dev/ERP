@@ -18,16 +18,28 @@ Problemas a resolver:
 
 - Duas impressoras com **área útil de 1,80 m**, rolos de 300 a 500 m.
 - O **RIP faz o espelhamento e o aproveitamento do rolo**: o sistema entrega
-  um arquivo por peça (espelhar fica como opção).
+  um arquivo por peça (espelhar fica como opção). Aceita PNG, PDF e JPG e
+  converte para PRN.
+- **Sem emenda de painéis**: transferência na calandra até 1,80 m de largura;
+  prensa plana de 2,00 × 1,20 m. Toda peça precisa caber em 1,80 m em uma direção.
+- Resolução: 150 DPI (almofadas, travesseiros), 100 DPI (porta, fachada).
 - Volume: **mais de 1000 almofadas por dia** — geração em paralelo é requisito.
 - Peça = estampa + **1 cm de margem de cada lado** (segurança e costura).
   A arte fica **somente dentro** da área visível; a margem é branca, com
   **borda preta** no limite externo e o **código do pedido** escrito nela.
   - Almofada 45×45 → peça 47×47
   - Capa de travesseiro 40×70 → peça 42×72
-  - Capa de porta: sob medida, de 0,70 × 2,00 m a 1,50 × 3,00 m
+  - Capa de porta: sob medida, de 0,70 × 2,00 m a 1,50 × 3,00 m, **margem de 3 cm** (elástico)
   - Fachadas: sob medida
 - Saída em **PDF ou PNG**, cores sempre em **RGB** (sRGB).
+
+## Tipos de entrada
+
+1. **Marketplace (personalizado)**: pedido no UpSeller + arte/foto do cliente.
+2. **Fotomoldura**: arte da loja (PNG com o espaço da foto transparente) +
+   foto do cliente por baixo. Ex.: almofadas "I ♥ My Boyfriend/Girlfriend".
+3. **Cliente local (arte pronta)**: abre uma **ordem de serviço**, gera os
+   arquivos para o RIP e a ficha da produção, e avisa a produção.
 
 ## Ideia central: template com áreas de arte
 
@@ -87,7 +99,9 @@ tratada, lado) · Peça / arquivo de produção · Lote (rolo) · Template de mo
 1. **Gerador de arquivos de produção** ✅ *(este repositório, `estampa`)*:
    catálogo de produtos (fixos e sob medida), tratamento de cor,
    enquadramento, aviso de resolução, ampliação por IA opcional, um arquivo
-   por peça para o RIP (PNG/JPG/PDF) em paralelo e montagem opcional no rolo.
+   por peça para o RIP (PNG/JPG/PDF) em paralelo e montagem opcional no rolo;
+   fotomolduras com detecção automática do espaço da foto; ordem de serviço
+   com ficha em PDF e aviso por webhook.
 2. **Fila de pedidos**: importar a planilha do UpSeller, mapear SKU → produto,
    tela web para recortar/aprovar a arte, gerar lotes.
 3. **Mockups**: (a) 3D com Three.js para almofada e travesseiro — imagens em
@@ -101,11 +115,10 @@ o modelo de produto já prevê outros processos.
 
 ## Pendências
 
-- Qual RIP é usado e se ele aceita PNG/JPG direto na pasta monitorada.
-- Margens da capa de porta e da fachada (hoje 1 cm, como as almofadas) e se
-  fachada leva bainha/ilhós.
-- Fachadas com os dois lados acima de 1,80 m: emenda feita pelo RIP
-  (painéis) ou o sistema deve dividir a arte com sobreposição?
-- Resolução para peças grandes (hoje 100 DPI para porta e fachada).
+- Margem da fachada (hoje 1 cm) e se leva bainha/ilhós.
+- Canal do aviso da OS para a produção (grupo de WhatsApp, Telegram, tela na produção?).
+- Fotomoldura: enquadrar automaticamente pelo rosto (detecção facial) em vez
+  do centro da foto.
+- Indicar na ficha se a peça vai para a calandra ou para a prensa (2,00 × 1,20 m).
 - Com 1000+ peças/dia, a etapa de conferência humana vira o gargalo: a tela
   de aprovação da Fase 2 precisa ser em grade, com aprovação em massa.

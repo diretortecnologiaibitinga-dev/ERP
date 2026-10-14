@@ -98,7 +98,7 @@ def test_sob_medida_no_csv(catalogo, arte, tmp_path):
                    "P1,capa-porta,1,arte.png,\"70,5\",200\nP2,almofada-45,1,arte.png,,\n")
     itens = ler_pedidos_csv(csv, catalogo)
     porta = itens[0].produto
-    assert (porta.codigo, porta.largura_total_cm, porta.altura_total_cm) == ("capa-porta-70.5x200", 72.5, 202)
+    assert (porta.codigo, porta.largura_total_cm, porta.altura_total_cm) == ("capa-porta-70.5x200", 76.5, 206)
     assert itens[1].produto.codigo == "almofada-45"
 
 
@@ -106,6 +106,7 @@ def test_sob_medida_no_csv(catalogo, arte, tmp_path):
     ("P1,capa-porta,1,arte.png,,", "informe largura_cm"),
     ("P1,capa-porta,1,arte.png,160,200", "acima do máximo"),
     ("P1,almofada-45,1,arte.png,50,50", "medida fixa"),
+    ("P1,fachada,1,arte.png,200,190", "não cabe na largura"),
 ])
 def test_sob_medida_validacao(catalogo, tmp_path, linha, erro):
     csv = tmp_path / "pedidos.csv"
@@ -119,7 +120,7 @@ def test_peca_maior_que_comprimento_max_fica_sozinha(catalogo, arte):
     pronta = preparar_arte(arte, 150, 300, 5)
     pecas = [Peca(produto=porta, arte=pronta, pedido="P")] + _pecas(catalogo, arte, "almofada-45", 3)
     folhas = encaixar(pecas, 180, 0.5, 300)
-    assert len(folhas[0].posicoes) == 1 and folhas[0].comprimento_cm == 302
+    assert len(folhas[0].posicoes) == 1 and folhas[0].comprimento_cm == 306
     assert len(folhas[1].posicoes) == 3
 
 
@@ -128,10 +129,16 @@ def test_cli_peca_sob_medida(arte, tmp_path):
                  "--pedido", "9", "--frente", str(arte), "--saida", str(tmp_path), "--dpi", "10"]) == 0
     from PIL import Image
     img = Image.open(tmp_path / "capa-porta-70x200_9.png")
-    assert img.size == (cm_para_px(72, 10), cm_para_px(202, 10))
+    assert img.size == (cm_para_px(76, 10), cm_para_px(206, 10))
 
 
 def test_cli_produto_inexistente(arte, tmp_path, capsys):
     assert main(["peca", "--produto", "xx", "--pedido", "1", "--frente", str(arte),
                  "--saida", str(tmp_path)]) == 1
     assert "não cadastrado" in capsys.readouterr().err
+
+
+def test_fachada_cabe_deitada(catalogo, tmp_path):
+    csv = tmp_path / "pedidos.csv"
+    csv.write_text("pedido,produto,quantidade,arte_frente,largura_cm,altura_cm\nF,fachada,1,a.png,400,120\n")
+    assert ler_pedidos_csv(csv, catalogo)[0].produto.altura_total_cm == 122

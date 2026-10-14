@@ -67,9 +67,27 @@ class Config:
 
 
 @dataclass(frozen=True)
+class ConfigOS:
+    pasta: Path = Path("ordens")
+    prefixo: str = "OS"
+    webhook_url: str = ""
+
+
+@dataclass(frozen=True)
 class Catalogo:
     config: Config
     produtos: dict[str, Produto]
+    pasta_molduras: Path = Path("molduras")
+    os: ConfigOS = ConfigOS()
+
+    def validar_impressao(self, produto: Produto) -> None:
+        """Sem emenda de painéis: a peça tem que caber na largura do rolo/calandra."""
+        largura = self.config.largura_rolo_cm
+        if min(produto.largura_total_cm, produto.altura_total_cm) > largura:
+            raise ValueError(
+                f"{produto.nome}: peça de {produto.largura_total_cm:g}x{produto.altura_total_cm:g} cm "
+                f"não cabe na largura de impressão de {largura:g} cm"
+            )
 
     def produto(self, codigo: str) -> Produto:
         try:
@@ -82,9 +100,13 @@ class Catalogo:
 def carregar_catalogo(caminho: Path | str = CATALOGO_PADRAO) -> Catalogo:
     with open(caminho, "rb") as f:
         dados = tomllib.load(f)
-    config = Config(**dados.get("geral", {}))
+    geral = dict(dados.get("geral", {}))
+    pasta_molduras = Path(caminho).resolve().parent / geral.pop("pasta_molduras", "molduras")
+    config = Config(**geral)
     produtos = {
         codigo: Produto(codigo=codigo, **campos)
         for codigo, campos in dados.get("produtos", {}).items()
     }
-    return Catalogo(config=config, produtos=produtos)
+    os_ = dict(dados.get("os", {}))
+    os_["pasta"] = Path(caminho).resolve().parent / os_.get("pasta", "ordens")
+    return Catalogo(config=config, produtos=produtos, pasta_molduras=pasta_molduras, os=ConfigOS(**os_))

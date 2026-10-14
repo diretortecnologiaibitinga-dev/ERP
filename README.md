@@ -16,13 +16,18 @@ feito no Corel:
   um item com problema não para o lote e aparece no relatório;
 - produtos **sob medida** (capa de porta, fachada) com a medida vinda do pedido;
 - **sem espelhamento** por padrão (o RIP espelha); `--espelhar` quando precisar;
+- **fotomoldura**: PNG com transparência onde vai a foto (ex.: o coração); a
+  foto do cliente entra por baixo, enquadrada no espaço, e a moldura vai por cima;
+- **ordem de serviço** para clientes que mandam a arte pronta: número
+  sequencial, arquivos para o RIP, ficha em PDF para a produção e aviso automático;
+- recusa peças que não cabem em 1,80 m (rolo/calandra) em nenhuma direção;
 - opcional `--montar-rolo`: monta as peças no rolo de 1,80 m em PDF no tamanho real.
 
 | Produto | Estampa | Peça impressa |
 |---|---|---|
 | `almofada-45` | 45 × 45 cm | 47 × 47 cm |
 | `travesseiro-40x70` | 40 × 70 cm | 42 × 72 cm |
-| `capa-porta` | sob medida, até 150 × 300 cm (100 DPI) | + 1 cm de cada lado |
+| `capa-porta` | sob medida, até 150 × 300 cm (100 DPI) | + 3 cm de cada lado (elástico) |
 | `fachada` | sob medida (100 DPI) | + 1 cm de cada lado |
 
 Novos produtos e parâmetros (DPI, largura do rolo, espaçamento, espessura da
@@ -53,6 +58,35 @@ estampa lote exemplos/pedidos.csv --formato jpg      # ~3x mais rápido e leve
 # alternativa: peças já encaixadas no rolo de 1,80 m (PDF)
 estampa lote exemplos/pedidos.csv --montar-rolo --saida lotes/
 ```
+
+### Fotomoldura
+
+```bash
+# molduras/coracao-boyfriend.png com o coração transparente
+estampa peca --produto almofada-45 --pedido 250201 --moldura coracao-boyfriend --frente foto.jpg
+# ajuste fino do enquadramento: aproximar e subir a foto
+estampa peca ... --zoom 1.3 --desloc-y -0.5
+estampa molduras   # lista as molduras e os espaços para foto
+```
+
+Na planilha: colunas `moldura` / `moldura_verso` (código ou caminho do PNG),
+foto em `arte_frente` (várias fotos separadas por `|`) e, opcionalmente,
+`zoom`, `desloc_x`, `desloc_y`. Veja [molduras/LEIAME.md](molduras/LEIAME.md).
+
+### Ordem de serviço (cliente local com arte pronta)
+
+```bash
+estampa os exemplos/os_cliente_local.csv --cliente "Loja do João" \
+  --entrega 20/10 --obs "Embalar em pares" --saida /caminho/da/pasta-do-rip
+```
+
+- numeração `OS-000001`, `OS-000002`… (o número sai na margem de cada peça);
+- arquivos de produção direto na pasta do RIP;
+- `ordens/OS-000001/` com a **ficha em PDF** (miniaturas, quantidades e campos
+  Impresso / Prensado / Costurado / Conferido), `os.json` e a planilha;
+- aviso para a produção via `webhook_url` na seção `[os]` do `produtos.toml`
+  (JSON com `text` pronto: funciona com n8n, Make, ntfy, Discord ou um robô
+  de WhatsApp/Telegram). Se o aviso falhar, a OS é criada mesmo assim.
 
 Os arquivos começam pelo produto, para a fila do RIP ficar agrupada:
 `almofada-45_250101ABC_frente_1de2.png`.

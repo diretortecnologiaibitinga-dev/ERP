@@ -5,6 +5,9 @@
     estampa peca --produto capa-porta --largura 70 --altura 200 --pedido 12345 --frente arte.jpg
     estampa lote pedidos.csv --saida pasta-do-rip/          # um arquivo por peça
     estampa lote pedidos.csv --montar-rolo --saida lotes/   # peças já encaixadas no rolo
+    estampa peca --produto almofada-45 --pedido 1 --moldura coracao-boyfriend --frente foto.jpg
+    estampa os itens.csv --cliente "Loja do João" --entrega 20/10   # cliente com arte pronta
+    estampa molduras
 """
 
 from __future__ import annotations
@@ -14,9 +17,11 @@ import sys
 import time
 from pathlib import Path
 
-from .lote import (ItemPedido, OpcoesExportacao, encaixar, exportar_itens, gerar_pecas,
-                   ler_pedidos_csv, salvar_folha_pdf)
+from . import ordem
 from .imagem import criar_ampliador
+from .lote import (ItemPedido, Lado, OpcoesExportacao, encaixar, exportar_itens, gerar_pecas,
+                   ler_pedidos_csv, resolver_moldura, salvar_folha_pdf)
+from .moldura import Ajuste, carregar_moldura, detectar_furos
 from .produtos import CATALOGO_PADRAO, carregar_catalogo
 
 
@@ -44,18 +49,28 @@ def _opcoes(args: argparse.Namespace, cfg) -> OpcoesExportacao:
     )
 
 
-def _relatorio(itens: list[ItemPedido], op: OpcoesExportacao, processos: int | None) -> int:
-    inicio, arquivos, erros = time.monotonic(), 0, 0
+def _exportar(itens: list[ItemPedido], op: OpcoesExportacao, processos: int | None):
+    """Exporta e imprime o relatório. Devolve (arquivos, avisos, erros)."""
+    inicio = time.monotonic()
+    arquivos: list[Path] = []
+    avisos: list[str] = []
+    erros: list[str] = []
     for r in exportar_itens(itens, op, processos):
-        arquivos += len(r.arquivos)
-        for aviso in r.avisos:
-            print(f"AVISO: {aviso}", file=sys.stderr)
+        arquivos += r.arquivos
+        avisos += r.avisos
         if r.erro:
-            erros += 1
-            print(f"ERRO: pedido {r.pedido}: {r.erro}", file=sys.stderr)
-    print(f"{arquivos} arquivo(s) em {op.saida} ({time.monotonic() - inicio:.1f}s)"
-          + (f", {erros} item(ns) com erro" if erros else ""))
-    return 1 if erros else 0
+            erros.append(f"pedido {r.pedido}: {r.erro}")
+    for aviso in avisos:
+        print(f"AVISO: {aviso}", file=sys.stderr)
+    for erro in erros:
+        print(f"ERRO: {erro}", file=sys.stderr)
+    print(f"{len(arquivos)} arquivo(s) em {op.saida} ({time.monotonic() - inicio:.1f}s)"
+          + (f", {len(erros)} item(ns) com erro" if erros else ""))
+    return arquivos, avisos, erros
+
+
+def _relatorio(itens: list[ItemPedido], op: OpcoesExportacao, processos: int | None) -> int:
+    return 1 if _exportar(itens, op, processos)[2] else 0
 
 
 def cmd_peca(args: argparse.Namespace) -> int:
@@ -65,9 +80,57 @@ def cmd_peca(args: argparse.Namespace) -> int:
         if not (args.largura and args.altura):
             raise ValueError(f"{produto.nome} é sob medida: informe --largura e --altura (cm)")
         produto = produto.com_medidas(args.largura, args.altura)
-    item = ItemPedido(args.pedido, produto, args.quantidade,
-                      Path(args.frente), Path(args.verso) if args.verso else None)
+        cat.validar_impressao(produto)
+    ajuste = Ajuste(args.zoom, args.desloc_x, args.desloc_y)
+    lados = [Lado(tuple(map(Path, args.frente)), resolver_moldura(args.moldura or "", Path.cwd(), cat), ajuste)]
+    if args.verso:
+        lados.append(Lado(tuple(map(Path, args.verso)),
+                          resolver_moldura(args.moldura_verso or "", Path.cwd(), cat), ajuste))
+    item = ItemPedido(args.pedido, produto, args.quantidade, lados)
     return _relatorio([item], _opcoes(args, cat.config), processos=1)
+
+
+def cmd_molduras(args: argparse.Namespace) -> int:
+    cat = carregar_catalogo(args.catalogo)
+    arquivos = sorted(cat.pasta_molduras.glob("*.png"))
+    if not arquivos:
+        print(f"nenhuma moldura em {cat.pasta_molduras}")
+    for caminho in arquivos:
+        try:
+            img = carregar_moldura(caminho)
+            furos = detectar_furos(img)
+            info = f"{img.width}x{img.height} px, {len(furos)} espaço(s) para foto"
+        except ValueError as e:
+            info = f"INVÁLIDA: {e}"
+        print(f"{caminho.stem:28} {info}")
+    return 0
+
+
+def cmd_os(args: argparse.Namespace) -> int:
+    cat = carregar_catalogo(args.catalogo)
+    numero = ordem.proximo_numero(cat.os.pasta, cat.os.prefixo)
+    try:
+        itens = ler_pedidos_csv(args.csv, cat, pedido_padrao=numero)
+    except ValueError:
+        print(f"(número {numero} não utilizado)", file=sys.stderr)
+        raise
+    arquivos, avisos, erros = _exportar(itens, _opcoes(args, cat.config), args.processos)
+    os_ = ordem.OrdemServico(
+        numero=numero, cliente=args.cliente, criada_em=ordem.agora(), entrega=args.entrega,
+        observacoes=args.obs or "", itens=ordem.resumir(itens),
+        arquivos=[str(a) for a in arquivos], avisos=avisos, erros=erros,
+    )
+    pasta = ordem.registrar(cat.os.pasta, os_, itens, Path(args.csv))
+    print(f"{numero}: {os_.total_pecas} peça(s) — ficha em {pasta / f'{numero}_ficha.pdf'}")
+
+    webhook = args.webhook or cat.os.webhook_url
+    if webhook and not args.sem_aviso:
+        try:
+            ordem.notificar(webhook, os_)
+            print("produção avisada")
+        except OSError as e:
+            print(f"AVISO: não foi possível avisar a produção ({e})", file=sys.stderr)
+    return 1 if erros else 0
 
 
 def cmd_lote(args: argparse.Namespace) -> int:
@@ -118,8 +181,14 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("peca", help="gera os arquivos de um item de pedido")
     p.add_argument("--produto", required=True)
     p.add_argument("--pedido", required=True)
-    p.add_argument("--frente", required=True, help="arte da frente")
-    p.add_argument("--verso", help="arte do verso (frente e verso)")
+    p.add_argument("--frente", required=True, nargs="+",
+                   help="arte da frente (com moldura: uma foto por espaço da moldura)")
+    p.add_argument("--verso", nargs="+", help="arte do verso (frente e verso)")
+    p.add_argument("--moldura", help="código da moldura (pasta molduras/) ou PNG; a frente vira a foto")
+    p.add_argument("--moldura-verso", help="moldura do verso")
+    p.add_argument("--zoom", type=float, default=1.0, help="aproxima a foto dentro da moldura (>= 1)")
+    p.add_argument("--desloc-x", type=float, default=0.0, help="move a foto: -1 esquerda ... 1 direita")
+    p.add_argument("--desloc-y", type=float, default=0.0, help="move a foto: -1 topo ... 1 base")
     p.add_argument("--quantidade", type=int, default=1)
     p.add_argument("--largura", type=float, help="largura da estampa em cm (produtos sob medida)")
     p.add_argument("--altura", type=float, help="altura da estampa em cm (produtos sob medida)")
@@ -135,6 +204,20 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--comprimento-max", type=float, help="com --montar-rolo: comprimento máximo por arquivo")
     opcoes_comuns(p)
     p.set_defaults(func=cmd_lote)
+
+    p = sub.add_parser("os", help="abre uma ordem de serviço (cliente com arte pronta) e avisa a produção")
+    p.add_argument("csv", help="itens da OS (mesmas colunas do lote; a coluna pedido é opcional)")
+    p.add_argument("--cliente", required=True)
+    p.add_argument("--entrega", help="data de entrega combinada")
+    p.add_argument("--obs", help="observações para a produção")
+    p.add_argument("--webhook", help="URL para avisar a produção (padrão: [os] webhook_url)")
+    p.add_argument("--sem-aviso", action="store_true", help="não dispara o aviso")
+    p.add_argument("--processos", type=int, help="processos em paralelo (padrão: nº de núcleos)")
+    opcoes_comuns(p)
+    p.set_defaults(func=cmd_os)
+
+    sub.add_parser("molduras", help="lista as molduras e quantos espaços para foto cada uma tem"
+                   ).set_defaults(func=cmd_molduras)
 
     args = ap.parse_args(argv)
     try:

@@ -20,7 +20,7 @@ from reportlab.pdfgen.canvas import Canvas
 from .imagem import SRGB_ICC, ArtePreparada, cm_para_px
 from .produtos import Produto
 
-FONTE_TTF = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
+FONTES = ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "arialbd.ttf", "Arial Bold.ttf", "DejaVuSans-Bold.ttf")
 LADOS = ("FRENTE", "VERSO")
 
 
@@ -49,7 +49,8 @@ class Peca:
 
     @property
     def etiqueta(self) -> str:
-        partes = [f"PEDIDO {self.pedido}"]
+        # números de OS já vêm identificados (OS-000123); pedidos de marketplace não
+        partes = [self.pedido if self.pedido.startswith("OS-") else f"PEDIDO {self.pedido}"]
         if self.frente_verso:
             partes.append(LADOS[self.lado])
         if self.total_copias > 1:
@@ -82,11 +83,20 @@ def _base_png(peca: Peca, dpi: int, borda_mm: float) -> Image.Image:
     return cache[chave]
 
 
+def _fonte(tamanho: int) -> ImageFont.FreeTypeFont:
+    for nome in FONTES:  # Linux, Windows (arial está na pasta de fontes do sistema), macOS
+        try:
+            return ImageFont.truetype(nome, tamanho)
+        except OSError:
+            continue
+    return ImageFont.load_default(tamanho)
+
+
 def renderizar_png(peca: Peca, dpi: int, borda_mm: float) -> Image.Image:
     img = _base_png(peca, dpi, borda_mm).copy()
     m = cm_para_px(peca.produto.margem_cm, dpi)
     tamanho = max(8, cm_para_px(peca.tamanho_fonte_cm, dpi))
-    fonte = ImageFont.truetype(str(FONTE_TTF), tamanho) if FONTE_TTF.exists() else ImageFont.load_default(tamanho)
+    fonte = _fonte(tamanho)
     ImageDraw.Draw(img).text((img.width / 2, img.height - m / 2), peca.etiqueta,
                              fill="black", font=fonte, anchor="mm")
     if peca.deve_espelhar:

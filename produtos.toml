@@ -13,6 +13,13 @@ largura_rolo_cm = 180     # área útil de impressão das impressoras
 espaco_entre_pecas_cm = 0.5
 comprimento_max_cm = 300  # cada arquivo de lote é dividido nesse comprimento
 borda_mm = 1.0            # espessura da borda preta (linha de corte)
+pasta_molduras = "molduras"  # PNGs com transparência onde vai a foto; o nome do arquivo é o código
+
+[os]
+# Ordens de serviço (clientes que mandam a arte pronta)
+pasta = "ordens"          # uma pasta por OS: ficha em PDF, os.json, planilha
+prefixo = "OS"
+# webhook_url = "https://..."  # aviso para a produção (n8n, Make, ntfy, Discord, robô de WhatsApp)
 
 [produtos.almofada-45]
 nome = "Almofada 45x45"
@@ -31,12 +38,13 @@ lados = 2
 espelhar = false
 
 # Produtos sob medida: largura e altura (em cm) vêm de cada pedido.
-# Margens a confirmar com a produção.
+# Não há emenda de painéis: a peça precisa caber em 1,80 m (largura do rolo e
+# da calandra) em pelo menos uma direção.
 
 [produtos.capa-porta]
 nome = "Capa de porta"
 sob_medida = true
-margem_cm = 1
+margem_cm = 3             # elástico
 lados = 1
 dpi = 100                 # peças de até 1,50 x 3,00 m
 largura_max_cm = 150
@@ -45,6 +53,6 @@ altura_max_cm = 300
 [produtos.fachada]
 nome = "Fachada"
 sob_medida = true
-margem_cm = 1
+margem_cm = 1             # a confirmar (bainha/ilhós?)
 lados = 1
 dpi = 100

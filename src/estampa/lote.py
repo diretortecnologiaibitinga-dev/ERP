@@ -18,7 +18,8 @@ from pathlib import Path
 from reportlab.lib.units import cm
 from reportlab.pdfgen.canvas import Canvas
 
-from .imagem import Ampliador, ArtePreparada, criar_ampliador, preparar_arte
+from .imagem import Ampliador, ArtePreparada, cm_para_px, criar_ampliador, preparar_arte, preparar_imagem
+from .moldura import Ajuste, compor
 from .peca import Peca, desenhar_pdf, nome_arquivo, salvar_imagem, salvar_pdf
 from .produtos import Catalogo, Produto
 
@@ -107,13 +108,31 @@ def salvar_folha_pdf(folha: Folha, destino: Path | str, largura_cm: float, borda
     c.save()
 
 
+@dataclass(frozen=True)
+class Lado:
+    """O que vai em um lado da peça: uma arte pronta, ou foto(s) + moldura."""
+    fotos: tuple[Path, ...]
+    moldura: Path | None = None
+    ajuste: Ajuste = Ajuste()
+
+    def __post_init__(self) -> None:
+        if not self.fotos:
+            raise ValueError("lado sem arte")
+        if self.moldura is None and len(self.fotos) > 1:
+            raise ValueError("várias fotos no mesmo lado só com moldura")
+
+
 @dataclass
 class ItemPedido:
     pedido: str
     produto: Produto
     quantidade: int
-    arte_frente: Path
-    arte_verso: Path | None = None
+    lados: list[Lado]
+
+    @classmethod
+    def simples(cls, pedido: str, produto: Produto, quantidade: int,
+                frente: Path, verso: Path | None = None) -> ItemPedido:
+        return cls(pedido, produto, quantidade, [Lado((frente,))] + ([Lado((verso,))] if verso else []))
 
 
 def _medida(valor: str | None) -> float | None:
@@ -121,11 +140,34 @@ def _medida(valor: str | None) -> float | None:
     return float(valor) if valor else None
 
 
-def ler_pedidos_csv(caminho: Path | str, catalogo: Catalogo) -> list[ItemPedido]:
-    """CSV com colunas: pedido, produto, quantidade, arte_frente, arte_verso
-    e, para produtos sob medida, largura_cm e altura_cm da estampa.
+def _caminhos(valor: str, base: Path) -> tuple[Path, ...]:
+    """Várias fotos no mesmo lado vêm separadas por | (molduras com vários espaços)."""
+    return tuple(base / v.strip() for v in valor.split("|") if v.strip())
 
-    Caminhos de arte relativos são resolvidos a partir da pasta do CSV.
+
+def resolver_moldura(valor: str, base: Path, catalogo: Catalogo) -> Path | None:
+    """Código da biblioteca de molduras (ex.: `coracao-boyfriend`) ou caminho de PNG."""
+    valor = valor.strip()
+    if not valor:
+        return None
+    if Path(valor).suffix:
+        return base / valor
+    caminho = catalogo.pasta_molduras / f"{valor}.png"
+    if not caminho.exists():
+        raise ValueError(f"moldura '{valor}' não encontrada em {catalogo.pasta_molduras}")
+    return caminho
+
+
+def ler_pedidos_csv(caminho: Path | str, catalogo: Catalogo, pedido_padrao: str | None = None) -> list[ItemPedido]:
+    """CSV com colunas: pedido, produto, quantidade, arte_frente, arte_verso.
+
+    Opcionais: largura_cm e altura_cm (produtos sob medida); moldura e
+    moldura_verso (código da biblioteca ou PNG), com as fotos em arte_frente/
+    arte_verso (várias separadas por |); zoom, desloc_x e desloc_y para ajustar
+    o enquadramento da foto na moldura.
+
+    Caminhos relativos são resolvidos a partir da pasta do CSV. Sem a coluna
+    pedido, usa `pedido_padrao` (ex.: número da OS).
     """
     base = Path(caminho).resolve().parent
     itens = []
@@ -138,26 +180,46 @@ def ler_pedidos_csv(caminho: Path | str, catalogo: Catalogo) -> list[ItemPedido]
                     if largura is None or altura is None:
                         raise ValueError(f"{produto.nome} é sob medida: informe largura_cm e altura_cm")
                     produto = produto.com_medidas(largura, altura)
+                    catalogo.validar_impressao(produto)
                 elif largura is not None or altura is not None:
                     raise ValueError(f"{produto.nome} tem medida fixa; deixe largura_cm e altura_cm vazias")
-                verso = (linha.get("arte_verso") or "").strip()
-                if verso and produto.lados < 2:
-                    raise ValueError(f"{produto.nome} não aceita verso")
+
+                ajuste = Ajuste(
+                    zoom=_medida(linha.get("zoom")) or 1.0,
+                    desloc_x=_medida(linha.get("desloc_x")) or 0.0,
+                    desloc_y=_medida(linha.get("desloc_y")) or 0.0,
+                )
+                lados = [Lado(_caminhos(linha["arte_frente"], base),
+                              resolver_moldura(linha.get("moldura") or "", base, catalogo), ajuste)]
+                verso = _caminhos(linha.get("arte_verso") or "", base)
+                if verso:
+                    if produto.lados < 2:
+                        raise ValueError(f"{produto.nome} não aceita verso")
+                    lados.append(Lado(verso, resolver_moldura(linha.get("moldura_verso") or "", base, catalogo), ajuste))
+                pedido = (linha.get("pedido") or "").strip() or pedido_padrao
+                if not pedido:
+                    raise ValueError("informe o pedido")
             except (KeyError, ValueError) as e:
                 raise ValueError(f"linha {n}: {e.args[0]}") from None
-            itens.append(ItemPedido(
-                pedido=linha["pedido"].strip(),
-                produto=produto,
-                quantidade=int(linha.get("quantidade") or 1),
-                arte_frente=base / linha["arte_frente"].strip(),
-                arte_verso=base / verso if verso else None,
-            ))
+            itens.append(ItemPedido(pedido, produto, int(linha.get("quantidade") or 1), lados))
     return itens
 
 
 def dpi_do_produto(produto: Produto, padrao: int, forcado: int | None = None) -> int:
     """Prioridade: DPI pedido na hora > DPI do produto > DPI geral."""
     return forcado or produto.dpi or padrao
+
+
+def preparar_lado(lado: Lado, produto: Produto, dpi: int, ampliador: Ampliador | None = None) -> ArtePreparada:
+    if lado.moldura is None:
+        return preparar_arte(lado.fotos[0], produto.largura_cm, produto.altura_cm, dpi, ampliador)
+    comp = compor(lado.moldura, lado.fotos, produto.largura_cm,
+                  cm_para_px(produto.largura_cm, dpi), lado.ajuste, ampliador)
+    arte = preparar_imagem(comp.imagem, produto.largura_cm, produto.altura_cm, dpi, dpi_original=comp.dpi_fotos)
+    if comp.dpi_moldura < dpi:
+        arte.avisos.append(f"moldura {lado.moldura.name} tem {comp.dpi_moldura:.0f} DPI no tamanho final "
+                           f"(alvo {dpi}): exporte o PNG em maior resolução")
+    return arte
 
 
 def gerar_pecas(itens: list[ItemPedido], dpi: int, ampliador: Ampliador | None = None,
@@ -167,34 +229,33 @@ def gerar_pecas(itens: list[ItemPedido], dpi: int, ampliador: Ampliador | None =
     `dpi` é o padrão geral; produtos com DPI próprio (peças grandes) usam o
     seu, a não ser que `dpi_forcado` seja informado.
     """
-    cache: dict[tuple[Path, str], ArtePreparada] = {}
+    cache: dict[tuple[Lado, str], ArtePreparada] = {}
     avisos: list[str] = []
 
-    def arte(caminho: Path, produto: Produto, pedido: str) -> ArtePreparada:
-        chave = (caminho, produto.codigo)
+    def arte(lado: Lado, produto: Produto, pedido: str) -> ArtePreparada:
+        chave = (lado, produto.codigo)
         if chave not in cache:
             alvo = dpi_do_produto(produto, dpi, dpi_forcado)
-            cache[chave] = preparar_arte(caminho, produto.largura_cm, produto.altura_cm, alvo, ampliador)
+            cache[chave] = preparar_lado(lado, produto, alvo, ampliador)
+            avisos.extend(f"pedido {pedido}: {a}" for a in cache[chave].avisos)
             if cache[chave].dpi_original < alvo:
-                avisos.append(
-                    f"pedido {pedido}: {caminho.name} tem {cache[chave].dpi_original:.0f} DPI "
-                    f"no tamanho final (alvo {alvo})"
-                )
+                nomes = ", ".join(f.name for f in lado.fotos)
+                avisos.append(f"pedido {pedido}: {nomes} tem {cache[chave].dpi_original:.0f} DPI "
+                              f"no tamanho final (alvo {alvo})")
         return cache[chave]
 
     pecas: list[Peca] = []
     for item in itens:
-        lados = [item.arte_frente] + ([item.arte_verso] if item.arte_verso else [])
         for copia in range(1, item.quantidade + 1):
-            for lado, caminho in enumerate(lados):
+            for n, lado in enumerate(item.lados):
                 pecas.append(Peca(
                     produto=item.produto,
-                    arte=arte(caminho, item.produto, item.pedido),
+                    arte=arte(lado, item.produto, item.pedido),
                     pedido=item.pedido,
-                    lado=lado,
+                    lado=n,
                     copia=copia,
                     total_copias=item.quantidade,
-                    frente_verso=len(lados) == 2,
+                    frente_verso=len(item.lados) == 2,
                     espelhar=espelhar,
                 ))
     return pecas, avisos
