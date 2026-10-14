@@ -8,7 +8,7 @@ pytest.importorskip("cv2")
 from estampa.moldura import Ajuste, compor  # noqa: E402
 from estampa.rosto import centro_de_massa, detectar_rostos, recorte_pelo_rosto  # noqa: E402
 
-ROSTO = Path(__file__).parent / "dados" / "rosto.jpg"  # Eileen Collins, NASA (domínio público)
+ROSTO = Path(__file__).parents[1] / "src" / "estampa" / "demo_dados" / "rosto.jpg"  # Eileen Collins, NASA (domínio público)
 
 
 def _foto_com_rosto_no_canto(tmp_path):

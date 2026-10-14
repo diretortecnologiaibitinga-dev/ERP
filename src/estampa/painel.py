@@ -22,56 +22,67 @@ from . import ordem
 _NUMERO = re.compile(r"^[A-Za-z]+-\d+$")
 
 
-def criar_servidor(pasta_os: Path, host: str = "0.0.0.0", porta: int = 8080) -> ThreadingHTTPServer:
-    class Handler(BaseHTTPRequestHandler):
-        def _responder(self, status: int, corpo: bytes, tipo: str) -> None:
-            self.send_response(status)
-            self.send_header("Content-Type", tipo)
-            self.send_header("Content-Length", str(len(corpo)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(corpo)
+class PainelHandler(BaseHTTPRequestHandler):
+    """Rotas do painel. Subclasses definem `pasta_os` (e podem acrescentar rotas)."""
 
-        def _json(self, dados, status: int = 200) -> None:
-            self._responder(status, json.dumps(dados, ensure_ascii=False).encode(), "application/json; charset=utf-8")
+    pasta_os: Path
+    pagina_painel = "/"
+    navegacao = ""
 
-        def do_GET(self) -> None:  # noqa: N802
-            if self.path in ("/", "/index.html"):
-                self._responder(200, PAGINA.encode(), "text/html; charset=utf-8")
-            elif self.path == "/api/os":
-                lista = []
-                for os_ in ordem.listar(pasta_os):
-                    d = asdict(os_)
-                    d["total_pecas"] = os_.total_pecas
-                    d.pop("arquivos", None)
-                    lista.append(d)
-                self._json(lista[-200:])
-            elif self.path.startswith("/ficha/"):
-                numero = self.path.rsplit("/", 1)[-1]
-                ficha = pasta_os / numero / f"{numero}_ficha.pdf"
-                if _NUMERO.match(numero) and ficha.exists():
-                    self._responder(200, ficha.read_bytes(), "application/pdf")
-                else:
-                    self._json({"erro": "ficha não encontrada"}, HTTPStatus.NOT_FOUND)
+    def _responder(self, status: int, corpo: bytes, tipo: str) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", tipo)
+        self.send_header("Content-Length", str(len(corpo)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(corpo)
+
+    def _json(self, dados, status: int = 200) -> None:
+        self._responder(status, json.dumps(dados, ensure_ascii=False).encode(), "application/json; charset=utf-8")
+
+    def do_GET(self) -> None:  # noqa: N802
+        pasta_os = self.pasta_os
+        if self.path in (self.pagina_painel, self.pagina_painel + "index.html"):
+            pagina = PAGINA.replace("<!--NAV-->", self.navegacao)
+            self._responder(200, pagina.encode(), "text/html; charset=utf-8")
+        elif self.path == "/api/os":
+            lista = []
+            for os_ in ordem.listar(pasta_os):
+                d = asdict(os_)
+                d["total_pecas"] = os_.total_pecas
+                d.pop("arquivos", None)
+                lista.append(d)
+            self._json(lista[-200:])
+        elif self.path.startswith("/ficha/"):
+            numero = self.path.rsplit("/", 1)[-1]
+            ficha = pasta_os / numero / f"{numero}_ficha.pdf"
+            if _NUMERO.match(numero) and ficha.exists():
+                self._responder(200, ficha.read_bytes(), "application/pdf")
             else:
-                self._json({"erro": "não encontrado"}, HTTPStatus.NOT_FOUND)
+                self._json({"erro": "ficha não encontrada"}, HTTPStatus.NOT_FOUND)
+        else:
+            self._json({"erro": "não encontrado"}, HTTPStatus.NOT_FOUND)
 
-        def do_POST(self) -> None:  # noqa: N802
-            m = re.match(r"^/api/os/([^/]+)/status$", self.path)
-            if not m or not _NUMERO.match(m.group(1)):
-                return self._json({"erro": "não encontrado"}, HTTPStatus.NOT_FOUND)
-            try:
-                tamanho = int(self.headers.get("Content-Length") or 0)
-                status = json.loads(self.rfile.read(tamanho) or b"{}").get("status", "")
-                os_ = ordem.mudar_status(pasta_os, m.group(1), status)
-            except (ValueError, json.JSONDecodeError) as e:
-                return self._json({"erro": str(e)}, HTTPStatus.BAD_REQUEST)
-            self._json({"numero": os_.numero, "status": os_.status})
+    def do_POST(self) -> None:  # noqa: N802
+        pasta_os = self.pasta_os
+        m = re.match(r"^/api/os/([^/]+)/status$", self.path)
+        if not m or not _NUMERO.match(m.group(1)):
+            return self._json({"erro": "não encontrado"}, HTTPStatus.NOT_FOUND)
+        try:
+            tamanho = int(self.headers.get("Content-Length") or 0)
+            status = json.loads(self.rfile.read(tamanho) or b"{}").get("status", "")
+            os_ = ordem.mudar_status(pasta_os, m.group(1), status)
+        except (ValueError, json.JSONDecodeError) as e:
+            return self._json({"erro": str(e)}, HTTPStatus.BAD_REQUEST)
+        self._json({"numero": os_.numero, "status": os_.status})
 
-        def log_message(self, *args) -> None:
-            pass
+    def log_message(self, *args) -> None:
+        pass
 
-    return ThreadingHTTPServer((host, porta), Handler)
+
+def criar_servidor(pasta_os: Path, host: str = "0.0.0.0", porta: int = 8080) -> ThreadingHTTPServer:
+    handler = type("Handler", (PainelHandler,), {"pasta_os": pasta_os})
+    return ThreadingHTTPServer((host, porta), handler)
 
 
 PAGINA = r"""<!doctype html>
@@ -96,7 +107,7 @@ main{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding
 .acoes{display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:8px}.acoes a{color:inherit}
 .erro{color:var(--prensa);font-weight:600}.vazio{color:var(--sub);font-style:italic}
 </style></head><body>
-<header><h1>Produção</h1><div><span id="hora"></span> <button id="som">🔔 Ativar som</button></div></header>
+<!--NAV--><header><h1>Produção</h1><div><span id="hora"></span> <button id="som">🔔 Ativar som</button></div></header>
 <main>
 <section class="col"><h2>Abertas</h2><div id="aberta"></div></section>
 <section class="col"><h2>Em produção</h2><div id="em produção"></div></section>

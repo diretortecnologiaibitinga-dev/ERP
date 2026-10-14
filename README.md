@@ -22,8 +22,8 @@ feito no Corel:
 - **ordem de serviço** para clientes que mandam a arte pronta: número
   sequencial, arquivos para o RIP, ficha em PDF para a produção e aviso por
   **Telegram, WhatsApp e painel da produção** (tela com as OS);
-- **calandra ou prensa** por produto ou por item, conferindo se a peça cabe
-  no equipamento (calandra 1,80 m; prensa 1,20 × 2,00 m);
+- **prensa ou calandra**: por padrão vai para a prensa (1,20 × 2,00 m) e, se
+  não couber, para a calandra (1,80 m); rolo a rolo é escolhido como calandra;
 - recusa peças que não cabem em 1,80 m (rolo/calandra) em nenhuma direção;
 - opcional `--montar-rolo`: monta as peças no rolo de 1,80 m em PDF no tamanho real.
 
@@ -36,6 +36,29 @@ feito no Corel:
 
 Novos produtos e parâmetros (DPI, largura do rolo, espaçamento, espessura da
 borda, espelhamento) ficam em [`produtos.toml`](produtos.toml).
+
+## Demonstração (comece por aqui)
+
+```bash
+pip install -e ".[rosto]"
+estampa demo            # gera dados fictícios e abre no navegador (≈ 20 s)
+estampa demo --rapido   # versão rápida, arquivos em 50 DPI
+```
+
+Cria a pasta `demo/` com pedidos fictícios de Shopee, Mercado Livre e TikTok,
+artes, fotos, molduras e dois clientes locais, roda o fluxo real e abre
+`http://localhost:8080` com:
+
+- **Pedidos do dia** — cada pedido testa uma regra (frente e verso, cópias,
+  fotomoldura com rosto no canto, casal, foto sem rosto, arte em baixa
+  resolução, porta que cabe/não cabe na prensa, rolo a rolo, arte faltando) e
+  mostra os arquivos gerados, os avisos e os erros;
+- **Painel da produção** — as duas OS fictícias;
+- **Testar com sua foto** — envie uma foto ou arte, escolha produto e moldura e
+  veja o arquivo de produção na hora.
+
+Pelo celular, na mesma rede: `http://<ip-do-computador>:8080`.
+`estampa demo --recriar` apaga e gera tudo de novo.
 
 ## Instalação
 
@@ -84,11 +107,12 @@ acha rosto, centraliza e avisa para conferir. Informar `zoom`/`desloc_*`
 desliga o automático para aquela foto; `--sem-rosto` desliga para o lote.
 Para um detector mais preciso, veja [modelos/LEIAME.md](modelos/LEIAME.md).
 
-### Calandra ou prensa
+### Prensa ou calandra
 
-Cada produto tem um padrão (`transferencia` no `produtos.toml`). Por item, use
-a coluna `transferencia` da planilha; para tudo, `--transferencia prensa`. A
-peça é recusada se não couber no equipamento. A ficha, o painel e os avisos
+O padrão é `auto`: **prensa** quando a peça cabe na mesa de 1,20 × 2,00 m e
+**calandra** quando não cabe (ex.: porta 150 × 300). Para rolo a rolo, use a
+coluna `transferencia` = `calandra` na planilha ou `--transferencia calandra`
+para a OS/lote inteiro. Escolher `prensa` para uma peça que não cabe dá erro. A ficha, o painel e os avisos
 mostram o equipamento; com `separar_por_transferencia = true` os arquivos vão
 para as subpastas `calandra/` e `prensa/` da pasta do RIP.
 

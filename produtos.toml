@@ -46,7 +46,7 @@ prefixo = "OS"
 
 [produtos.almofada-45]
 nome = "Almofada 45x45"
-transferencia = "calandra"   # ou "prensa" (mesa de 1,20 x 2,00 m)
+transferencia = "auto"   # prensa se couber (1,20 x 2,00 m); "calandra" = rolo a rolo
 largura_cm = 45
 altura_cm = 45
 margem_cm = 1
@@ -55,7 +55,7 @@ espelhar = false
 
 [produtos.travesseiro-40x70]
 nome = "Capa de travesseiro 40x70"
-transferencia = "calandra"   # ou "prensa" (mesa de 1,20 x 2,00 m)
+transferencia = "auto"   # prensa se couber (1,20 x 2,00 m); "calandra" = rolo a rolo
 largura_cm = 40
 altura_cm = 70
 margem_cm = 1
@@ -68,7 +68,7 @@ espelhar = false
 
 [produtos.capa-porta]
 nome = "Capa de porta"
-transferencia = "calandra"   # ou "prensa" (mesa de 1,20 x 2,00 m)
+transferencia = "auto"   # prensa se couber (1,20 x 2,00 m); "calandra" = rolo a rolo
 sob_medida = true
 margem_cm = 3             # elástico
 lados = 1
@@ -78,7 +78,7 @@ altura_max_cm = 300
 
 [produtos.fachada]
 nome = "Fachada"
-transferencia = "calandra"   # ou "prensa" (mesa de 1,20 x 2,00 m)
+transferencia = "auto"   # prensa se couber (1,20 x 2,00 m); "calandra" = rolo a rolo
 sob_medida = true
 margem_cm = 1             # a confirmar (bainha/ilhós?)
 lados = 1

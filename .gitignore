@@ -5,3 +5,4 @@ __pycache__/
 saida/
 ordens/
 modelos/*.onnx
+demo/

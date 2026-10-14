@@ -22,6 +22,8 @@ Problemas a resolver:
   converte para PRN.
 - **Sem emenda de painéis**: transferência na calandra até 1,80 m de largura;
   prensa plana de 2,00 × 1,20 m. Toda peça precisa caber em 1,80 m em uma direção.
+- **Prensa é o padrão**; calandra só no rolo a rolo — ou quando a peça não cabe
+  na prensa (escolha automática).
 - Resolução: 150 DPI (almofadas, travesseiros), 100 DPI (porta, fachada).
 - Volume: **mais de 1000 almofadas por dia** — geração em paralelo é requisito.
 - Peça = estampa + **1 cm de margem de cada lado** (segurança e costura).
@@ -94,6 +96,13 @@ Modelo de dados: Produto (dimensões, margem, lados, espelhamento) ·
 mapeamento SKU → produto/variação · Pedido / ItemPedido · Arte (original,
 tratada, lado) · Peça / arquivo de produção · Lote (rolo) · Template de mockup.
 
+## Demonstração
+
+`estampa demo` gera dados fictícios, roda o fluxo completo e abre uma página
+com os pedidos do dia (cada um testando uma regra), o painel da produção e um
+teste com upload de foto/arte. Serve para validar as regras com a produção
+antes de ligar os dados reais.
+
 ## Fases
 
 1. **Gerador de arquivos de produção** ✅ *(este repositório, `estampa`)*:
@@ -117,7 +126,6 @@ o modelo de produto já prevê outros processos.
 ## Pendências
 
 - Margem da fachada (hoje 1 cm) e se leva bainha/ilhós.
-- Quais produtos vão por padrão para a prensa (hoje todos estão em calandra).
 - Painel: hoje sem senha (rede interna). Se for acessado de fora, precisa de login.
 - Com 1000+ peças/dia, a etapa de conferência humana vira o gargalo: a tela
   de aprovação da Fase 2 precisa ser em grade, com aprovação em massa.

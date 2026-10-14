@@ -15,8 +15,8 @@ def _catalogo_padrao() -> Path:
 
 CATALOGO_PADRAO = _catalogo_padrao()
 
-TRANSFERENCIAS = ("calandra", "prensa")
-Transferencia = Literal["calandra", "prensa"]
+TRANSFERENCIAS = ("auto", "prensa", "calandra")
+Transferencia = Literal["auto", "prensa", "calandra"]
 
 
 @dataclass(frozen=True)
@@ -28,7 +28,7 @@ class Produto:
     margem_cm: float = 1.0
     lados: int = 1
     espelhar: bool = False
-    transferencia: Transferencia = "calandra"  # equipamento padrão da transferência
+    transferencia: Transferencia = "auto"  # auto = prensa se couber, senão calandra
     sob_medida: bool = False      # medidas vêm de cada pedido
     dpi: int | None = None        # sobrepõe o DPI geral (peças grandes)
     largura_max_cm: float | None = None
@@ -89,21 +89,34 @@ class Catalogo:
     os: ConfigOS = ConfigOS()
     avisos: dict = field(default_factory=dict)
 
-    def validar_impressao(self, produto: Produto, transferencia: str | None = None) -> None:
-        """Sem emenda de painéis: a peça tem que caber na largura do rolo/calandra
-        e, se for para a prensa, na mesa da prensa (em qualquer orientação)."""
+    def cabe_na_prensa(self, produto: Produto) -> bool:
+        w, h = produto.largura_total_cm, produto.altura_total_cm
+        pl, pc = self.config.prensa_largura_cm, self.config.prensa_comprimento_cm
+        return (w <= pl and h <= pc) or (h <= pl and w <= pc)
+
+    def resolver_transferencia(self, produto: Produto, pedida: str | None = None) -> str:
+        """Equipamento da transferência ("prensa" ou "calandra"), validando o tamanho.
+
+        Sem emenda de painéis: a peça tem que caber na largura do rolo/calandra.
+        `auto` (padrão) usa a prensa quando a peça cabe na mesa e a calandra
+        quando não cabe; rolo a rolo é escolhido explicitamente como calandra.
+        """
         w, h = produto.largura_total_cm, produto.altura_total_cm
         largura = self.config.largura_rolo_cm
         if min(w, h) > largura:
             raise ValueError(f"{produto.nome}: peça de {w:g}x{h:g} cm não cabe na largura de impressão de {largura:g} cm")
-        transferencia = transferencia or produto.transferencia
-        if transferencia not in TRANSFERENCIAS:
-            raise ValueError(f"transferência '{transferencia}' inválida (use calandra ou prensa)")
-        if transferencia == "prensa":
+        escolha = (pedida or produto.transferencia or "auto").strip().lower()
+        if escolha not in TRANSFERENCIAS:
+            raise ValueError(f"transferência '{escolha}' inválida (use auto, prensa ou calandra)")
+        if escolha == "auto":
+            return "prensa" if self.cabe_na_prensa(produto) else "calandra"
+        if escolha == "prensa" and not self.cabe_na_prensa(produto):
             pl, pc = self.config.prensa_largura_cm, self.config.prensa_comprimento_cm
-            cabe = (w <= pl and h <= pc) or (h <= pl and w <= pc)
-            if not cabe:
-                raise ValueError(f"{produto.nome}: peça de {w:g}x{h:g} cm não cabe na prensa de {pl:g}x{pc:g} cm")
+            raise ValueError(f"{produto.nome}: peça de {w:g}x{h:g} cm não cabe na prensa de {pl:g}x{pc:g} cm")
+        return escolha
+
+    def validar_impressao(self, produto: Produto, transferencia: str | None = None) -> None:
+        self.resolver_transferencia(produto, transferencia)
 
     def produto(self, codigo: str) -> Produto:
         try:

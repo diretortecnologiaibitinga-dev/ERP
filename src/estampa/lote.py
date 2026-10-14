@@ -129,11 +129,13 @@ class ItemPedido:
     produto: Produto
     quantidade: int
     lados: list[Lado]
-    transferencia: str | None = None  # None = padrão do produto
+    transferencia: str | None = None  # "prensa"/"calandra" já resolvido (Catalogo.resolver_transferencia)
 
     @property
     def equipamento(self) -> str:
-        return self.transferencia or self.produto.transferencia
+        if self.transferencia:
+            return self.transferencia
+        return "prensa" if self.produto.transferencia == "auto" else self.produto.transferencia
 
     @classmethod
     def simples(cls, pedido: str, produto: Produto, quantidade: int,
@@ -171,8 +173,8 @@ def ler_pedidos_csv(caminho: Path | str, catalogo: Catalogo, pedido_padrao: str 
     Opcionais: largura_cm e altura_cm (produtos sob medida); moldura e
     moldura_verso (código da biblioteca ou PNG), com as fotos em arte_frente/
     arte_verso (várias separadas por |); zoom, desloc_x e desloc_y para ajustar
-    o enquadramento da foto na moldura; transferencia (calandra ou prensa,
-    padrão do produto). `transferencia` sobrepõe a coluna para todos os itens.
+    o enquadramento da foto na moldura; transferencia (auto, prensa ou
+    calandra; padrão do produto). `transferencia` sobrepõe a coluna para todos.
 
     Caminhos relativos são resolvidos a partir da pasta do CSV. Sem a coluna
     pedido, usa `pedido_padrao` (ex.: número da OS).
@@ -190,8 +192,8 @@ def ler_pedidos_csv(caminho: Path | str, catalogo: Catalogo, pedido_padrao: str 
                     produto = produto.com_medidas(largura, altura)
                 elif largura is not None or altura is not None:
                     raise ValueError(f"{produto.nome} tem medida fixa; deixe largura_cm e altura_cm vazias")
-                equipamento = transferencia or (linha.get("transferencia") or "").strip().lower() or None
-                catalogo.validar_impressao(produto, equipamento)
+                equipamento = catalogo.resolver_transferencia(
+                    produto, transferencia or (linha.get("transferencia") or "").strip() or None)
 
                 ajuste = Ajuste(
                     zoom=_medida(linha.get("zoom")) or 1.0,
@@ -227,7 +229,7 @@ def preparar_lado(lado: Lado, produto: Produto, dpi: int, ampliador: Ampliador |
                   cm_para_px(produto.largura_cm, dpi), lado.ajuste, ampliador, rosto)
     arte = preparar_imagem(comp.imagem, produto.largura_cm, produto.altura_cm, dpi, dpi_original=comp.dpi_fotos)
     arte.avisos.extend(comp.avisos)
-    if comp.dpi_moldura < dpi:
+    if round(comp.dpi_moldura) < dpi:
         arte.avisos.append(f"moldura {lado.moldura.name} tem {comp.dpi_moldura:.0f} DPI no tamanho final "
                            f"(alvo {dpi}): exporte o PNG em maior resolução")
     return arte
@@ -250,7 +252,7 @@ def gerar_pecas(itens: list[ItemPedido], dpi: int, ampliador: Ampliador | None =
             alvo = dpi_do_produto(produto, dpi, dpi_forcado)
             cache[chave] = preparar_lado(lado, produto, alvo, ampliador, rosto)
             avisos.extend(f"pedido {pedido}: {a}" for a in cache[chave].avisos)
-            if cache[chave].dpi_original < alvo:
+            if round(cache[chave].dpi_original) < alvo:
                 nomes = ", ".join(f.name for f in lado.fotos)
                 avisos.append(f"pedido {pedido}: {nomes} tem {cache[chave].dpi_original:.0f} DPI "
                               f"no tamanho final (alvo {alvo})")
@@ -310,6 +312,10 @@ def exportar_item(item: ItemPedido, op: OpcoesExportacao) -> ResultadoItem:
             else:
                 salvar_imagem(peca, destino, dpi_do_produto(peca.produto, op.dpi, op.dpi_forcado), op.borda_mm)
             resultado.arquivos.append(destino)
+    except FileNotFoundError as e:
+        resultado.erro = f"arquivo não encontrado: {Path(e.filename or '').name or e}"
+    except ValueError as e:  # regras do produto/moldura: a mensagem já explica
+        resultado.erro = str(e)
     except Exception as e:  # noqa: BLE001 — o erro vai para o relatório do lote
         resultado.erro = f"{type(e).__name__}: {e}"
     return resultado

@@ -10,6 +10,7 @@
     estampa molduras
     estampa painel --porta 8080          # tela da produção
     estampa aviso-teste                  # testa Telegram/WhatsApp/webhook configurados
+    estampa demo                         # demonstração com dados fictícios no navegador
 """
 
 from __future__ import annotations
@@ -93,13 +94,13 @@ def cmd_peca(args: argparse.Namespace) -> int:
         if not (args.largura and args.altura):
             raise ValueError(f"{produto.nome} é sob medida: informe --largura e --altura (cm)")
         produto = produto.com_medidas(args.largura, args.altura)
-    cat.validar_impressao(produto, args.transferencia)
+    equipamento = cat.resolver_transferencia(produto, args.transferencia)
     ajuste = Ajuste(args.zoom, args.desloc_x, args.desloc_y)
     lados = [Lado(tuple(map(Path, args.frente)), resolver_moldura(args.moldura or "", Path.cwd(), cat), ajuste)]
     if args.verso:
         lados.append(Lado(tuple(map(Path, args.verso)),
                           resolver_moldura(args.moldura_verso or "", Path.cwd(), cat), ajuste))
-    item = ItemPedido(args.pedido, produto, args.quantidade, lados, args.transferencia)
+    item = ItemPedido(args.pedido, produto, args.quantidade, lados, equipamento)
     return _relatorio([item], _opcoes(args, cat.config), processos=1)
 
 
@@ -165,6 +166,29 @@ def cmd_aviso_teste(args: argparse.Namespace) -> int:
     return 0 if _avisar(cat, teste, None, args.webhook) else 1
 
 
+def cmd_demo(args: argparse.Namespace) -> int:
+    from .demo import criar_demo
+    from .demo_web import criar_servidor_demo
+
+    pasta = Path(args.pasta)
+    if args.recriar or not (pasta / "resultado.json").exists():
+        print(f"Gerando dados fictícios e rodando o fluxo em {pasta.resolve()} ...")
+        resumo = criar_demo(pasta, dpi=50 if args.rapido else None)
+        n = sum(len(i["arquivos"]) for i in resumo["itens"])
+        print(f"{len(resumo['itens'])} pedidos, {n} arquivos em {resumo['tempo_lote_s']} s; OS {', '.join(resumo['os'])}")
+    servidor = criar_servidor_demo(pasta, args.host, args.porta)
+    url = f"http://localhost:{args.porta}"
+    print(f"Demonstração em {url} (na rede: http://<ip-deste-computador>:{args.porta}) — Ctrl+C para sair")
+    if not args.sem_navegador:
+        import webbrowser
+        webbrowser.open(url)
+    try:
+        servidor.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
 def cmd_painel(args: argparse.Namespace) -> int:
     from .painel import criar_servidor
     cat = carregar_catalogo(args.catalogo)
@@ -220,8 +244,8 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--dpi", type=int, help="resolução de saída (padrão do catálogo/produto)")
         p.add_argument("--ampliador", choices=["lanczos", "realesrgan"], default="lanczos",
                        help="realesrgan usa IA (precisa do realesrgan-ncnn-vulkan instalado)")
-        p.add_argument("--transferencia", choices=["calandra", "prensa"],
-                       help="equipamento de transferência para todos os itens (padrão: o de cada produto)")
+        p.add_argument("--transferencia", choices=["auto", "prensa", "calandra"],
+                       help="prensa, calandra (rolo a rolo) ou auto: prensa se couber (padrão do produto)")
         p.add_argument("--sem-rosto", action="store_true",
                        help="fotomoldura: centraliza a foto em vez de enquadrar pelo rosto")
         g = p.add_mutually_exclusive_group()
@@ -274,6 +298,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--porta", type=int, default=8080)
     p.add_argument("--host", default="0.0.0.0", help="0.0.0.0 = acessível pela rede local")
     p.set_defaults(func=cmd_painel)
+
+    p = sub.add_parser("demo", help="demonstração com dados fictícios, aberta no navegador")
+    p.add_argument("--pasta", default="demo", help="onde criar os dados da demonstração")
+    p.add_argument("--porta", type=int, default=8080)
+    p.add_argument("--host", default="0.0.0.0")
+    p.add_argument("--recriar", action="store_true", help="apaga e gera os dados de novo")
+    p.add_argument("--rapido", action="store_true", help="arquivos em 50 DPI (gera em poucos segundos)")
+    p.add_argument("--sem-navegador", action="store_true", help="não abre o navegador")
+    p.set_defaults(func=cmd_demo)
 
     p = sub.add_parser("aviso-teste", help="envia uma mensagem de teste pelos canais configurados")
     p.add_argument("--webhook")

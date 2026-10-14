@@ -61,7 +61,7 @@ class ResumoItem:
     quantidade: int
     lados: int
     artes: list[str]
-    transferencia: str = "calandra"
+    transferencia: str = "prensa"
 
     @property
     def pecas(self) -> int:
