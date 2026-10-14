@@ -10,11 +10,12 @@ cima para baixo.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter
 
+from . import rosto as _rosto
 from .imagem import Ampliador, carregar_rgb
 
 _MAX_LADO_DETECCAO = 512
@@ -25,11 +26,16 @@ class Ajuste:
     """Ajuste fino do enquadramento da foto dentro do furo.
 
     zoom >= 1 aproxima; desloc_x/desloc_y de -1 a 1 movem o recorte até o
-    limite da foto (-1 = esquerda/topo, 1 = direita/base).
+    limite da foto (-1 = esquerda/topo, 1 = direita/base). Informar qualquer
+    ajuste desliga o enquadramento automático pelo rosto.
     """
     zoom: float = 1.0
     desloc_x: float = 0.0
     desloc_y: float = 0.0
+
+    @property
+    def manual(self) -> bool:
+        return self != Ajuste()
 
 
 @dataclass
@@ -115,6 +121,7 @@ class Composicao:
     imagem: Image.Image
     dpi_fotos: float    # menor DPI entre as fotos, considerando o tamanho do furo na peça
     dpi_moldura: float  # DPI do PNG da moldura no tamanho da estampa
+    avisos: list[str] = field(default_factory=list)
 
 
 def compor(
@@ -124,6 +131,7 @@ def compor(
     largura_px_min: int,
     ajuste: Ajuste = Ajuste(),
     ampliador: Ampliador | None = None,
+    rosto: bool = True,
 ) -> Composicao:
     """Monta foto(s) + moldura. A composição é feita com a moldura ampliada
     para pelo menos `largura_px_min`, para a moldura não perder nitidez."""
@@ -142,14 +150,30 @@ def compor(
 
     base = Image.new("RGBA", moldura.size, (255, 255, 255, 255))
     dpis = []
+    avisos: list[str] = []
     for furo, caminho in zip(furos, fotos):
         x0, y0, x1, y1 = furo.caixa
         fw, fh = x1 - x0, y1 - y0
-        foto = recortar_cobrindo(carregar_rgb(caminho), fw / fh, ajuste)
+        original = carregar_rgb(caminho)
+        foto = None
+        if rosto and not ajuste.manual:
+            try:
+                rostos = _rosto.detectar_rostos(original)
+            except _rosto.SemDetector as e:
+                rostos = []
+                if str(e) not in avisos:
+                    avisos.append(str(e))
+            if rostos:
+                alvo = _rosto.centro_de_massa(furo.mascara.crop(furo.caixa))
+                foto = _rosto.recorte_pelo_rosto(original, fw / fh, rostos, alvo)
+            elif not avisos:
+                avisos.append(f"{Path(caminho).name}: rosto não encontrado, foto centralizada — confira")
+        if foto is None:
+            foto = recortar_cobrindo(original, fw / fh, ajuste)
         dpis.append(foto.width / (fw / moldura.width * largura_cm / 2.54))
         if ampliador and foto.width < fw:
             foto = ampliador.ampliar(foto, fw / foto.width)
         foto = foto.resize((fw, fh), Image.Resampling.LANCZOS)
         base.paste(foto, (x0, y0), furo.mascara.crop(furo.caixa))
     base.alpha_composite(moldura)
-    return Composicao(imagem=base.convert("RGB"), dpi_fotos=min(dpis), dpi_moldura=dpi_moldura)
+    return Composicao(imagem=base.convert("RGB"), dpi_fotos=min(dpis), dpi_moldura=dpi_moldura, avisos=avisos)

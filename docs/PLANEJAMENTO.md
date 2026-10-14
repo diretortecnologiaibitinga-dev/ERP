@@ -100,8 +100,9 @@ tratada, lado) · Peça / arquivo de produção · Lote (rolo) · Template de mo
    catálogo de produtos (fixos e sob medida), tratamento de cor,
    enquadramento, aviso de resolução, ampliação por IA opcional, um arquivo
    por peça para o RIP (PNG/JPG/PDF) em paralelo e montagem opcional no rolo;
-   fotomolduras com detecção automática do espaço da foto; ordem de serviço
-   com ficha em PDF e aviso por webhook.
+   fotomolduras com detecção automática do espaço da foto e enquadramento
+   pelo rosto; ordem de serviço com ficha em PDF; avisos por Telegram,
+   WhatsApp (Evolution API) e webhook; painel da produção; calandra/prensa.
 2. **Fila de pedidos**: importar a planilha do UpSeller, mapear SKU → produto,
    tela web para recortar/aprovar a arte, gerar lotes.
 3. **Mockups**: (a) 3D com Three.js para almofada e travesseiro — imagens em
@@ -116,9 +117,7 @@ o modelo de produto já prevê outros processos.
 ## Pendências
 
 - Margem da fachada (hoje 1 cm) e se leva bainha/ilhós.
-- Canal do aviso da OS para a produção (grupo de WhatsApp, Telegram, tela na produção?).
-- Fotomoldura: enquadrar automaticamente pelo rosto (detecção facial) em vez
-  do centro da foto.
-- Indicar na ficha se a peça vai para a calandra ou para a prensa (2,00 × 1,20 m).
+- Quais produtos vão por padrão para a prensa (hoje todos estão em calandra).
+- Painel: hoje sem senha (rede interna). Se for acessado de fora, precisa de login.
 - Com 1000+ peças/dia, a etapa de conferência humana vira o gargalo: a tela
   de aprovação da Fase 2 precisa ser em grade, com aprovação em massa.

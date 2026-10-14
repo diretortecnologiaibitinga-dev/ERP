@@ -55,7 +55,7 @@ def test_cli_os_gera_arquivos_ficha_e_avisa(arte, tmp_path, capsys):
     assert len(recebidos) == 1
     assert "OS-000001 — Loja do João" in recebidos[0]["text"]
     assert recebidos[0]["total_pecas"] == 5
-    assert "produção avisada" in capsys.readouterr().out
+    assert "produção avisada pelo webhook" in capsys.readouterr().out
 
 
 def test_etiqueta_da_os(catalogo, arte):
@@ -72,4 +72,4 @@ def test_aviso_falho_nao_derruba_a_os(arte, tmp_path, capsys):
     csv.write_text("produto,quantidade,arte_frente\nalmofada-45,1,arte.png\n")
     assert main(["--catalogo", str(toml), "os", str(csv), "--cliente", "X", "--saida", str(tmp_path / "rip"),
                  "--dpi", "20", "--webhook", "http://127.0.0.1:9/"]) == 0
-    assert "não foi possível avisar" in capsys.readouterr().err
+    assert "não foi possível avisar pelo webhook" in capsys.readouterr().err

@@ -10,6 +10,7 @@ mais área útil por linha (ex.: capa 42x72 em pé cabe 4 por linha).
 from __future__ import annotations
 
 import csv
+import multiprocessing
 import os
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
@@ -128,6 +129,11 @@ class ItemPedido:
     produto: Produto
     quantidade: int
     lados: list[Lado]
+    transferencia: str | None = None  # None = padrão do produto
+
+    @property
+    def equipamento(self) -> str:
+        return self.transferencia or self.produto.transferencia
 
     @classmethod
     def simples(cls, pedido: str, produto: Produto, quantidade: int,
@@ -158,13 +164,15 @@ def resolver_moldura(valor: str, base: Path, catalogo: Catalogo) -> Path | None:
     return caminho
 
 
-def ler_pedidos_csv(caminho: Path | str, catalogo: Catalogo, pedido_padrao: str | None = None) -> list[ItemPedido]:
+def ler_pedidos_csv(caminho: Path | str, catalogo: Catalogo, pedido_padrao: str | None = None,
+                    transferencia: str | None = None) -> list[ItemPedido]:
     """CSV com colunas: pedido, produto, quantidade, arte_frente, arte_verso.
 
     Opcionais: largura_cm e altura_cm (produtos sob medida); moldura e
     moldura_verso (código da biblioteca ou PNG), com as fotos em arte_frente/
     arte_verso (várias separadas por |); zoom, desloc_x e desloc_y para ajustar
-    o enquadramento da foto na moldura.
+    o enquadramento da foto na moldura; transferencia (calandra ou prensa,
+    padrão do produto). `transferencia` sobrepõe a coluna para todos os itens.
 
     Caminhos relativos são resolvidos a partir da pasta do CSV. Sem a coluna
     pedido, usa `pedido_padrao` (ex.: número da OS).
@@ -180,9 +188,10 @@ def ler_pedidos_csv(caminho: Path | str, catalogo: Catalogo, pedido_padrao: str 
                     if largura is None or altura is None:
                         raise ValueError(f"{produto.nome} é sob medida: informe largura_cm e altura_cm")
                     produto = produto.com_medidas(largura, altura)
-                    catalogo.validar_impressao(produto)
                 elif largura is not None or altura is not None:
                     raise ValueError(f"{produto.nome} tem medida fixa; deixe largura_cm e altura_cm vazias")
+                equipamento = transferencia or (linha.get("transferencia") or "").strip().lower() or None
+                catalogo.validar_impressao(produto, equipamento)
 
                 ajuste = Ajuste(
                     zoom=_medida(linha.get("zoom")) or 1.0,
@@ -201,7 +210,7 @@ def ler_pedidos_csv(caminho: Path | str, catalogo: Catalogo, pedido_padrao: str 
                     raise ValueError("informe o pedido")
             except (KeyError, ValueError) as e:
                 raise ValueError(f"linha {n}: {e.args[0]}") from None
-            itens.append(ItemPedido(pedido, produto, int(linha.get("quantidade") or 1), lados))
+            itens.append(ItemPedido(pedido, produto, int(linha.get("quantidade") or 1), lados, equipamento))
     return itens
 
 
@@ -210,12 +219,14 @@ def dpi_do_produto(produto: Produto, padrao: int, forcado: int | None = None) ->
     return forcado or produto.dpi or padrao
 
 
-def preparar_lado(lado: Lado, produto: Produto, dpi: int, ampliador: Ampliador | None = None) -> ArtePreparada:
+def preparar_lado(lado: Lado, produto: Produto, dpi: int, ampliador: Ampliador | None = None,
+                  rosto: bool = True) -> ArtePreparada:
     if lado.moldura is None:
         return preparar_arte(lado.fotos[0], produto.largura_cm, produto.altura_cm, dpi, ampliador)
     comp = compor(lado.moldura, lado.fotos, produto.largura_cm,
-                  cm_para_px(produto.largura_cm, dpi), lado.ajuste, ampliador)
+                  cm_para_px(produto.largura_cm, dpi), lado.ajuste, ampliador, rosto)
     arte = preparar_imagem(comp.imagem, produto.largura_cm, produto.altura_cm, dpi, dpi_original=comp.dpi_fotos)
+    arte.avisos.extend(comp.avisos)
     if comp.dpi_moldura < dpi:
         arte.avisos.append(f"moldura {lado.moldura.name} tem {comp.dpi_moldura:.0f} DPI no tamanho final "
                            f"(alvo {dpi}): exporte o PNG em maior resolução")
@@ -223,7 +234,8 @@ def preparar_lado(lado: Lado, produto: Produto, dpi: int, ampliador: Ampliador |
 
 
 def gerar_pecas(itens: list[ItemPedido], dpi: int, ampliador: Ampliador | None = None,
-                espelhar: bool | None = None, dpi_forcado: int | None = None) -> tuple[list[Peca], list[str]]:
+                espelhar: bool | None = None, dpi_forcado: int | None = None,
+                rosto: bool = True) -> tuple[list[Peca], list[str]]:
     """Expande cada item em peças (cópias x lados). Retorna também avisos.
 
     `dpi` é o padrão geral; produtos com DPI próprio (peças grandes) usam o
@@ -236,7 +248,7 @@ def gerar_pecas(itens: list[ItemPedido], dpi: int, ampliador: Ampliador | None =
         chave = (lado, produto.codigo)
         if chave not in cache:
             alvo = dpi_do_produto(produto, dpi, dpi_forcado)
-            cache[chave] = preparar_lado(lado, produto, alvo, ampliador)
+            cache[chave] = preparar_lado(lado, produto, alvo, ampliador, rosto)
             avisos.extend(f"pedido {pedido}: {a}" for a in cache[chave].avisos)
             if cache[chave].dpi_original < alvo:
                 nomes = ", ".join(f.name for f in lado.fotos)
@@ -270,6 +282,8 @@ class OpcoesExportacao:
     borda_mm: float = 1.0
     ampliador: str = "lanczos"
     espelhar: bool | None = None
+    rosto: bool = True
+    separar_por_transferencia: bool = False
 
 
 @dataclass
@@ -285,9 +299,12 @@ def exportar_item(item: ItemPedido, op: OpcoesExportacao) -> ResultadoItem:
     arquivo de arte com problema não derruba o lote inteiro."""
     resultado = ResultadoItem(item.pedido)
     try:
-        pecas, resultado.avisos = gerar_pecas([item], op.dpi, criar_ampliador(op.ampliador), op.espelhar, op.dpi_forcado)
+        pecas, resultado.avisos = gerar_pecas([item], op.dpi, criar_ampliador(op.ampliador), op.espelhar,
+                                              op.dpi_forcado, op.rosto)
+        pasta = op.saida / item.equipamento if op.separar_por_transferencia else op.saida
+        pasta.mkdir(parents=True, exist_ok=True)
         for peca in pecas:
-            destino = op.saida / f"{nome_arquivo(peca)}.{op.formato}"
+            destino = pasta / f"{nome_arquivo(peca)}.{op.formato}"
             if op.formato == "pdf":
                 salvar_pdf(peca, destino, op.borda_mm)
             else:
@@ -306,5 +323,6 @@ def exportar_itens(itens: list[ItemPedido], op: OpcoesExportacao, processos: int
         for item in itens:
             yield exportar_item(item, op)
         return
-    with ProcessPoolExecutor(max_workers=processos) as pool:
+    # spawn em todas as plataformas: igual ao Windows e seguro com threads (OpenCV, servidor do painel)
+    with ProcessPoolExecutor(max_workers=processos, mp_context=multiprocessing.get_context("spawn")) as pool:
         yield from pool.map(exportar_item, itens, [op] * len(itens))

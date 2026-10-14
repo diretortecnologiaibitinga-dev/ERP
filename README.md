@@ -17,9 +17,13 @@ feito no Corel:
 - produtos **sob medida** (capa de porta, fachada) com a medida vinda do pedido;
 - **sem espelhamento** por padrão (o RIP espelha); `--espelhar` quando precisar;
 - **fotomoldura**: PNG com transparência onde vai a foto (ex.: o coração); a
-  foto do cliente entra por baixo, enquadrada no espaço, e a moldura vai por cima;
+  foto do cliente entra por baixo e a moldura vai por cima, com **enquadramento
+  automático pelo rosto** (casal: os dois rostos);
 - **ordem de serviço** para clientes que mandam a arte pronta: número
-  sequencial, arquivos para o RIP, ficha em PDF para a produção e aviso automático;
+  sequencial, arquivos para o RIP, ficha em PDF para a produção e aviso por
+  **Telegram, WhatsApp e painel da produção** (tela com as OS);
+- **calandra ou prensa** por produto ou por item, conferindo se a peça cabe
+  no equipamento (calandra 1,80 m; prensa 1,20 × 2,00 m);
 - recusa peças que não cabem em 1,80 m (rolo/calandra) em nenhuma direção;
 - opcional `--montar-rolo`: monta as peças no rolo de 1,80 m em PDF no tamanho real.
 
@@ -36,7 +40,8 @@ borda, espelhamento) ficam em [`produtos.toml`](produtos.toml).
 ## Instalação
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[rosto]"     # uso (com enquadramento pelo rosto)
+pip install -e ".[dev]"       # desenvolvimento (testes)
 ```
 
 ## Uso
@@ -73,6 +78,20 @@ Na planilha: colunas `moldura` / `moldura_verso` (código ou caminho do PNG),
 foto em `arte_frente` (várias fotos separadas por `|`) e, opcionalmente,
 `zoom`, `desloc_x`, `desloc_y`. Veja [molduras/LEIAME.md](molduras/LEIAME.md).
 
+**Rosto automático:** o rosto (ou os rostos, em foto de casal) é colocado no
+centro do espaço da moldura — num coração, um pouco acima do meio. Quando não
+acha rosto, centraliza e avisa para conferir. Informar `zoom`/`desloc_*`
+desliga o automático para aquela foto; `--sem-rosto` desliga para o lote.
+Para um detector mais preciso, veja [modelos/LEIAME.md](modelos/LEIAME.md).
+
+### Calandra ou prensa
+
+Cada produto tem um padrão (`transferencia` no `produtos.toml`). Por item, use
+a coluna `transferencia` da planilha; para tudo, `--transferencia prensa`. A
+peça é recusada se não couber no equipamento. A ficha, o painel e os avisos
+mostram o equipamento; com `separar_por_transferencia = true` os arquivos vão
+para as subpastas `calandra/` e `prensa/` da pasta do RIP.
+
 ### Ordem de serviço (cliente local com arte pronta)
 
 ```bash
@@ -84,9 +103,26 @@ estampa os exemplos/os_cliente_local.csv --cliente "Loja do João" \
 - arquivos de produção direto na pasta do RIP;
 - `ordens/OS-000001/` com a **ficha em PDF** (miniaturas, quantidades e campos
   Impresso / Prensado / Costurado / Conferido), `os.json` e a planilha;
-- aviso para a produção via `webhook_url` na seção `[os]` do `produtos.toml`
-  (JSON com `text` pronto: funciona com n8n, Make, ntfy, Discord ou um robô
-  de WhatsApp/Telegram). Se o aviso falhar, a OS é criada mesmo assim.
+- aviso para a produção pelos canais configurados em `[avisos]` no `produtos.toml`
+  (podem ser usados juntos; se um falhar, os outros e a OS seguem normalmente):
+  - **Telegram**: robô criado no @BotFather, adicionado ao grupo da produção —
+    manda a mensagem e a ficha em PDF;
+  - **WhatsApp**: grupo via [Evolution API](https://doc.evolution-api.com/)
+    (não oficial: use um número só para a produção, há risco de bloqueio);
+  - **webhook**: n8n, Make, ntfy, Discord…
+  - `estampa aviso-teste` manda uma mensagem de teste.
+  Tokens podem ficar em variáveis de ambiente: `token = "env:TELEGRAM_TOKEN"`.
+
+### Painel da produção
+
+```bash
+estampa painel --porta 8080
+```
+
+Abra `http://<ip-do-computador>:8080` na TV/monitor da produção (ou no
+celular). Colunas Abertas / Em produção / Concluídas, com entrega, itens,
+calandra/prensa e link para a ficha; atualiza sozinho e toca um aviso quando
+chega OS nova (clique em "Ativar som" uma vez). Sem senha: só na rede interna.
 
 Os arquivos começam pelo produto, para a fila do RIP ficar agrupada:
 `almofada-45_250101ABC_frente_1de2.png`.

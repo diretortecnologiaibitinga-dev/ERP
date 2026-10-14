@@ -1,9 +1,8 @@
 """Ordem de serviço (OS) para clientes que mandam a arte pronta.
 
 Cada OS recebe um número sequencial, gera os arquivos de produção (com o
-número da OS na margem), uma ficha em PDF para acompanhar a produção e
-dispara um aviso por webhook (n8n, Make, ntfy, Discord, ou um robô de
-WhatsApp/Telegram do grupo da produção).
+número da OS na margem), uma ficha em PDF para acompanhar a produção e avisa
+a produção (ver `avisos`). O andamento fica em `os.json` e aparece no painel.
 """
 
 from __future__ import annotations
@@ -11,7 +10,6 @@ from __future__ import annotations
 import io
 import json
 import shutil
-import urllib.request
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -53,6 +51,9 @@ def proximo_numero(pasta: Path, prefixo: str = "OS") -> str:
     return f"{prefixo}-{atual:06d}"
 
 
+STATUS = ("aberta", "em produção", "concluída")
+
+
 @dataclass
 class ResumoItem:
     produto: str
@@ -60,6 +61,7 @@ class ResumoItem:
     quantidade: int
     lados: int
     artes: list[str]
+    transferencia: str = "calandra"
 
     @property
     def pecas(self) -> int:
@@ -77,6 +79,8 @@ class OrdemServico:
     arquivos: list[str] = field(default_factory=list)
     avisos: list[str] = field(default_factory=list)
     erros: list[str] = field(default_factory=list)
+    status: str = "aberta"
+    historico: list[dict] = field(default_factory=list)
 
     @property
     def total_pecas(self) -> int:
@@ -88,7 +92,7 @@ class OrdemServico:
             linhas.append(f"Entrega: {self.entrega}")
         for i in self.itens:
             lados = " (frente e verso)" if i.lados == 2 else ""
-            linhas.append(f"• {i.quantidade}x {i.produto}{lados}")
+            linhas.append(f"• {i.quantidade}x {i.produto}{lados} — {i.transferencia}")
         linhas.append(f"Total: {self.total_pecas} peça(s), arquivos já na pasta do RIP")
         if self.erros:
             linhas.append(f"ATENÇÃO: {len(self.erros)} item(ns) com erro")
@@ -103,14 +107,15 @@ def resumir(itens: list[ItemPedido]) -> list[ResumoItem]:
             quantidade=i.quantidade,
             lados=len(i.lados),
             artes=[", ".join(f.name for f in lado.fotos) for lado in i.lados],
+            transferencia=i.equipamento,
         )
         for i in itens
     ]
 
 
-def _miniatura(item: ItemPedido, lado: int) -> ImageReader | None:
+def _miniatura(item: ItemPedido, lado: int, rosto: bool) -> ImageReader | None:
     try:
-        arte = preparar_lado(item.lados[lado], item.produto, DPI_MINIATURA)
+        arte = preparar_lado(item.lados[lado], item.produto, DPI_MINIATURA, rosto=rosto)
     except Exception:  # noqa: BLE001 — a ficha sai mesmo sem miniatura; o erro aparece no lote
         return None
     buf = io.BytesIO()
@@ -120,7 +125,7 @@ def _miniatura(item: ItemPedido, lado: int) -> ImageReader | None:
     return ImageReader(buf)
 
 
-def gerar_ficha_pdf(os_: OrdemServico, itens: list[ItemPedido], destino: Path) -> None:
+def gerar_ficha_pdf(os_: OrdemServico, itens: list[ItemPedido], destino: Path, rosto: bool = True) -> None:
     """Ficha A4 com miniatura de cada item e campos de conferência."""
     c = Canvas(str(destino), pagesize=A4)
     largura, altura = A4
@@ -154,7 +159,7 @@ def gerar_ficha_pdf(os_: OrdemServico, itens: list[ItemPedido], destino: Path) -
             y = cabecalho()
         x = 1.5 * cm
         for lado in range(len(item.lados)):
-            mini = _miniatura(item, lado)
+            mini = _miniatura(item, lado, rosto)
             if mini:
                 c.drawImage(mini, x, y - 3.6 * cm, 3.6 * cm, 3.6 * cm, preserveAspectRatio=True)
             c.rect(x, y - 3.6 * cm, 3.6 * cm, 3.6 * cm)
@@ -164,6 +169,14 @@ def gerar_ficha_pdf(os_: OrdemServico, itens: list[ItemPedido], destino: Path) -
         tx = 1.5 * cm + 2 * 3.9 * cm + 0.3 * cm
         c.setFont("Helvetica-Bold", 12)
         c.drawString(tx, y - 0.5 * cm, f"{resumo.quantidade}x  {resumo.produto}")
+        etiqueta = resumo.transferencia.upper()
+        c.setFont("Helvetica-Bold", 9)
+        lw = c.stringWidth(etiqueta, "Helvetica-Bold", 9) + 0.4 * cm
+        c.setFillColor(HexColor("#b3261e") if resumo.transferencia == "prensa" else HexColor("#1f4e8c"))
+        c.roundRect(largura - 1.5 * cm - lw, y - 0.65 * cm, lw, 0.5 * cm, 0.1 * cm, stroke=0, fill=1)
+        c.setFillColor(HexColor("#ffffff"))
+        c.drawCentredString(largura - 1.5 * cm - lw / 2, y - 0.5 * cm, etiqueta)
+        c.setFillColor(black)
         c.setFont("Helvetica", 9)
         c.drawString(tx, y - 1.1 * cm, f"Peça {resumo.medida_cm} cm  ·  "
                                        f"{'frente e verso' if resumo.lados == 2 else 'só frente'}  ·  "
@@ -183,24 +196,43 @@ def gerar_ficha_pdf(os_: OrdemServico, itens: list[ItemPedido], destino: Path) -
     c.save()
 
 
-def notificar(webhook_url: str, os_: OrdemServico, timeout: float = 10) -> None:
-    """POST JSON com a OS e um campo `text`/`content` pronto para exibir."""
-    texto = os_.resumo_texto()
-    corpo = {"text": texto, "content": texto, "os": asdict(os_), "total_pecas": os_.total_pecas}
-    req = urllib.request.Request(
-        webhook_url, data=json.dumps(corpo, ensure_ascii=False).encode("utf-8"),
-        headers={"Content-Type": "application/json"}, method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        resp.read()
+def salvar_json(pasta: Path, os_: OrdemServico) -> None:
+    temporario = pasta / "os.json.tmp"
+    temporario.write_text(json.dumps(asdict(os_), ensure_ascii=False, indent=2), encoding="utf-8")
+    temporario.replace(pasta / "os.json")
 
 
-def registrar(pasta_os: Path, os_: OrdemServico, itens: list[ItemPedido], csv_origem: Path | None = None) -> Path:
+def carregar(pasta: Path) -> OrdemServico:
+    dados = json.loads((pasta / "os.json").read_text(encoding="utf-8"))
+    dados["itens"] = [ResumoItem(**i) for i in dados.get("itens", [])]
+    return OrdemServico(**dados)
+
+
+def listar(pasta_os: Path) -> list[OrdemServico]:
+    return [carregar(p.parent) for p in sorted(pasta_os.glob("*/os.json"))]
+
+
+def mudar_status(pasta_os: Path, numero: str, status: str) -> OrdemServico:
+    if status not in STATUS:
+        raise ValueError(f"status inválido: {status}")
+    pasta = pasta_os / numero
+    if not (pasta / "os.json").exists() or pasta.parent != pasta_os:
+        raise ValueError(f"OS {numero} não encontrada")
+    os_ = carregar(pasta)
+    os_.status = status
+    os_.historico.append({"status": status, "em": agora()})
+    salvar_json(pasta, os_)
+    return os_
+
+
+def registrar(pasta_os: Path, os_: OrdemServico, itens: list[ItemPedido], csv_origem: Path | None = None,
+              rosto: bool = True) -> Path:
     """Cria a pasta da OS com os.json, a ficha em PDF e a planilha de origem."""
     pasta = pasta_os / os_.numero
     pasta.mkdir(parents=True, exist_ok=True)
-    (pasta / "os.json").write_text(json.dumps(asdict(os_), ensure_ascii=False, indent=2), encoding="utf-8")
-    gerar_ficha_pdf(os_, itens, pasta / f"{os_.numero}_ficha.pdf")
+    os_.historico.append({"status": os_.status, "em": os_.criada_em})
+    salvar_json(pasta, os_)
+    gerar_ficha_pdf(os_, itens, pasta / f"{os_.numero}_ficha.pdf", rosto)
     if csv_origem:
         shutil.copy(csv_origem, pasta / f"{os_.numero}_itens.csv")
     return pasta

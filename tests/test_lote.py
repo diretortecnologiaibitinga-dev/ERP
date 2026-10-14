@@ -142,3 +142,28 @@ def test_fachada_cabe_deitada(catalogo, tmp_path):
     csv = tmp_path / "pedidos.csv"
     csv.write_text("pedido,produto,quantidade,arte_frente,largura_cm,altura_cm\nF,fachada,1,a.png,400,120\n")
     assert ler_pedidos_csv(csv, catalogo)[0].produto.altura_total_cm == 122
+
+
+def test_transferencia_por_item_e_validacao_da_prensa(catalogo, tmp_path):
+    csv = tmp_path / "pedidos.csv"
+    csv.write_text("pedido,produto,quantidade,arte_frente,largura_cm,altura_cm,transferencia\n"
+                   "A,almofada-45,1,a.png,,,\nB,almofada-45,1,a.png,,,prensa\n"
+                   "C,capa-porta,1,a.png,100,190,prensa\n")
+    itens = ler_pedidos_csv(csv, catalogo)
+    assert [i.equipamento for i in itens] == ["calandra", "prensa", "prensa"]
+    assert [i.equipamento for i in ler_pedidos_csv(csv, catalogo, transferencia="calandra")] == ["calandra"] * 3
+
+    csv.write_text("pedido,produto,quantidade,arte_frente,largura_cm,altura_cm,transferencia\n"
+                   "C,capa-porta,1,a.png,150,300,prensa\n")
+    with pytest.raises(ValueError, match="não cabe na prensa"):
+        ler_pedidos_csv(csv, catalogo)
+
+
+def test_separar_pastas_por_transferencia(catalogo, arte, tmp_path):
+    from estampa.lote import ItemPedido, Lado, OpcoesExportacao, exportar_itens
+    produto = catalogo.produto("almofada-45")
+    itens = [ItemPedido("A", produto, 1, [Lado((arte,))]), ItemPedido("B", produto, 1, [Lado((arte,))], "prensa")]
+    op = OpcoesExportacao(saida=tmp_path / "rip", dpi=20, separar_por_transferencia=True)
+    list(exportar_itens(itens, op, processos=1))
+    assert (tmp_path / "rip" / "calandra" / "almofada-45_A.png").exists()
+    assert (tmp_path / "rip" / "prensa" / "almofada-45_B.png").exists()

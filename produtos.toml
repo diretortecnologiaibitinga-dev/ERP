@@ -13,16 +13,40 @@ largura_rolo_cm = 180     # área útil de impressão das impressoras
 espaco_entre_pecas_cm = 0.5
 comprimento_max_cm = 300  # cada arquivo de lote é dividido nesse comprimento
 borda_mm = 1.0            # espessura da borda preta (linha de corte)
+enquadrar_rosto = true    # fotomoldura: posiciona a foto pelo rosto (precisa de OpenCV)
 pasta_molduras = "molduras"  # PNGs com transparência onde vai a foto; o nome do arquivo é o código
+
+# Equipamentos de transferência (sem emenda de painéis)
+prensa_largura_cm = 120
+prensa_comprimento_cm = 200
+separar_por_transferencia = false  # true = subpastas calandra/ e prensa/ na pasta do RIP
 
 [os]
 # Ordens de serviço (clientes que mandam a arte pronta)
 pasta = "ordens"          # uma pasta por OS: ficha em PDF, os.json, planilha
 prefixo = "OS"
-# webhook_url = "https://..."  # aviso para a produção (n8n, Make, ntfy, Discord, robô de WhatsApp)
+
+# Avisos de nova OS para a produção. Preencha os canais que quiser usar.
+# "env:NOME" lê o valor da variável de ambiente NOME (para não deixar senha aqui).
+# A tela da produção é o painel:  estampa painel
+
+[avisos.telegram]
+# token = "env:TELEGRAM_TOKEN"   # criado com o @BotFather
+# chat_id = "-1001234567890"     # grupo da produção (adicione o robô ao grupo)
+
+[avisos.whatsapp]
+# Evolution API (NÃO oficial — use um número só para a produção)
+# url = "http://localhost:8080"
+# instancia = "producao"
+# apikey = "env:EVOLUTION_APIKEY"
+# grupo = "120363000000000000@g.us"
+
+[avisos.webhook]
+# url = "https://..."             # n8n, Make, ntfy, Discord...
 
 [produtos.almofada-45]
 nome = "Almofada 45x45"
+transferencia = "calandra"   # ou "prensa" (mesa de 1,20 x 2,00 m)
 largura_cm = 45
 altura_cm = 45
 margem_cm = 1
@@ -31,6 +55,7 @@ espelhar = false
 
 [produtos.travesseiro-40x70]
 nome = "Capa de travesseiro 40x70"
+transferencia = "calandra"   # ou "prensa" (mesa de 1,20 x 2,00 m)
 largura_cm = 40
 altura_cm = 70
 margem_cm = 1
@@ -43,6 +68,7 @@ espelhar = false
 
 [produtos.capa-porta]
 nome = "Capa de porta"
+transferencia = "calandra"   # ou "prensa" (mesa de 1,20 x 2,00 m)
 sob_medida = true
 margem_cm = 3             # elástico
 lados = 1
@@ -52,6 +78,7 @@ altura_max_cm = 300
 
 [produtos.fachada]
 nome = "Fachada"
+transferencia = "calandra"   # ou "prensa" (mesa de 1,20 x 2,00 m)
 sob_medida = true
 margem_cm = 1             # a confirmar (bainha/ilhós?)
 lados = 1
