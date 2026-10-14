@@ -95,3 +95,55 @@ def gerar_pdf_moldes_exemplo(destino: Path, tamanhos: dict | None = None) -> Pat
     c.showPage()
     c.save()
     return destino
+
+
+def gerar_pdf_moldes_linhas(destino: Path) -> Path:
+    """Layout em linhas (como polo/raglan/regata): nome da linha à esquerda e
+    tamanhos sem texto. Duas linhas (POLO HOMEM e POLO MULHER), 3 tamanhos cada,
+    com gola, manga de poucos pontos e uma frente com contorno interno (costura)."""
+    largura, altura = 520, 360
+    c = Canvas(str(destino), pagesize=(largura * cm, altura * cm))
+    H = altura
+
+    def poligono(pts, x0, y0):
+        p = c.beginPath()
+        p.moveTo((x0 + pts[0][0]) * cm, (H - y0 - pts[0][1]) * cm)
+        for x, y in pts[1:]:
+            p.lineTo((x0 + x) * cm, (H - y0 - y) * cm)
+        p.close()
+        c.setFillColor(Color(1, 1, 1))
+        c.setStrokeColor(Color(0.2, 0.2, 0.2))
+        c.drawPath(p, stroke=1, fill=1)
+
+    def marcador(cx, cy, w, h, numero):
+        c.setFillColor(Color(0.184, 0.184, 0.184))
+        c.ellipse((cx - w / 2) * cm, (H - cy - h / 2) * cm, (cx + w / 2) * cm, (H - cy + h / 2) * cm, stroke=0, fill=1)
+        c.setFillColor(Color(1, 1, 1))
+        c.setFont("Helvetica-Bold", 40)
+        c.drawCentredString(cx * cm, (H - cy) * cm - 14, numero)
+
+    for linha, (rotulo, escalas, y) in enumerate((("POLO HOMEM", (1.1, 0.9, 1.0), 10),
+                                                  ("POLO MULHER", (0.85, 0.75, 0.8), 190))):
+        c.setFillColor(Color(0.2, 0.2, 0.2))
+        c.setFont("Helvetica-Bold", 200)
+        c.drawString(1 * cm, (H - y - 80) * cm, rotulo)
+        for col, s in enumerate(escalas):  # fora de ordem de propósito: o importador ordena pelo tamanho
+            x = 120 + col * 130
+            fw, fh = 50 * s, 66 * s
+            poligono([(0, 2 * s), (50 * s, 0), (52 * s, 6 * s), (2 * s, 8 * s)], x, y)  # gola
+            mw, mh = 38 * s, 22 * s
+            for j, num in enumerate(("4", "3")):
+                manga = [(0, mh * 0.5), (mw * 0.3, 0), (mw * 0.7, 0), (mw, mh * 0.5), (mw * 0.95, mh), (mw * 0.05, mh)]
+                poligono(manga, x + j * (mw + 4), y + 12 * s)
+                marcador(x + j * (mw + 4) + mw / 2, y + 12 * s + mh * 0.5, 9 * s, 6 * s, num)
+            fy = y + 38 * s
+            frente = contorno_corpo(fw, fh, "careca")
+            poligono(frente, x, fy)
+            interno = [(1.5 + px * (fw - 3) / fw, 1.5 + py * (fh - 3) / fh) for px, py in frente]
+            poligono(interno, x, fy)
+            for fx, num in ((0.3, "1"), (0.7, "2")):
+                marcador(x + fw * fx, fy + fh * 0.3, 10 * s, 7 * s, num)
+            poligono(contorno_corpo(fw, fh + 3, "costas"), x + fw + 2, fy)
+    c.showPage()
+    c.save()
+    return destino

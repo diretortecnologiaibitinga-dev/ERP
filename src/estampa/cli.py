@@ -201,19 +201,27 @@ def _quadros(modelo) -> None:
 
 
 def cmd_moldes(args: argparse.Namespace) -> int:
-    from .moldes import Modelo, desenhar_previa, importar_pdf
+    from .moldes import Modelo, desenhar_previa, importar_pdf_modelos
     from .uniforme import carregar_config
     cat = carregar_catalogo(args.catalogo)
     pasta = carregar_config(cat.uniformes, cat.base).pasta_moldes
     if args.acao == "importar":
-        modelo = importar_pdf(args.alvo, args.modelo)
-        destino = pasta / f"{modelo.codigo}.json"
-        modelo.salvar(destino)
-        desenhar_previa(modelo, pasta / f"{modelo.codigo}_previa.png")
-        for t in modelo.tamanhos.values():
-            print(f"  {t.nome:6} {t.grade:9} {', '.join(sorted(t.partes))}")
-        print(f"{len(modelo.tamanhos)} tamanho(s) importado(s) → {destino} (confira {modelo.codigo}_previa.png)")
-        _quadros(modelo)
+        if not args.alvo:
+            raise ValueError("informe o PDF dos moldes")
+        nomes = {}
+        for v in args.nomes or []:
+            if "=" not in v:
+                raise ValueError("--nomes espera MODELO=T1,T2,... (do menor para o maior)")
+            cod, lista = v.split("=", 1)
+            nomes[cod.strip()] = [t.strip() for t in lista.split(",") if t.strip()]
+        for modelo in importar_pdf_modelos(args.alvo, args.modelo, nomes):
+            destino = pasta / f"{modelo.codigo}.json"
+            modelo.salvar(destino)
+            desenhar_previa(modelo, pasta / f"{modelo.codigo}_previa.png")
+            print(f"\n{modelo.codigo}: {len(modelo.tamanhos)} tamanho(s) → {destino} (confira {modelo.codigo}_previa.png)")
+            for t in modelo.tamanhos.values():
+                print(f"  {t.nome:6} {t.grade:9} {', '.join(sorted(t.partes))}")
+            _quadros(modelo)
     elif args.acao == "listar":
         for arquivo in sorted(pasta.glob("*.json")):
             m = Modelo.carregar(arquivo)
@@ -233,9 +241,12 @@ def cmd_uniforme(args: argparse.Namespace) -> int:
     cfg = carregar_config(cat.uniformes, cat.base)
     artes = {k: Path(v) for k, v in (("frente", args.frente), ("costas", args.costas),
                                      ("manga_esq", args.manga_esq or args.manga),
-                                     ("manga_dir", args.manga_dir or args.manga)) if v}
+                                     ("manga_dir", args.manga_dir or args.manga), ("gola", args.gola_arte),
+                                     ("short_dir", args.short_dir or args.short), ("short_esq", args.short_esq or args.short),
+                                     ("short_faixa", args.short_faixa)) if v}
     ped = PedidoUniforme(args.pedido, _modelo_json(cat, args.modelo), artes, _pares(args.logo, "--logo"),
-                         _pares(args.elemento, "--elemento"), args.tipo_manga, args.gola, args.numero_frente)
+                         _pares(args.elemento, "--elemento"), args.tipo_manga, args.gola, args.numero_frente,
+                         args.conjunto)
     for nome in ped.imagens:
         if nome not in {e.nome for e in cfg.elementos}:
             raise ValueError(f"elemento '{nome}' não existe em [uniformes.elementos]")
@@ -396,6 +407,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("acao", choices=["importar", "listar", "previa"])
     p.add_argument("alvo", nargs="?", help="importar: PDF dos moldes; previa: código do modelo")
     p.add_argument("--modelo", help="importar: código do modelo (padrão: nome do arquivo)")
+    p.add_argument("--nomes", action="append", metavar="MODELO=T1,T2,...",
+                   help="importar: nomes dos tamanhos (menor → maior) quando o PDF não traz o texto")
     p.add_argument("--tamanhos", nargs="+", help="previa: só estes tamanhos")
     p.add_argument("--saida", help="previa: arquivo PNG")
     p.set_defaults(func=cmd_moldes)
@@ -410,10 +423,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--manga-esq", help="arte da manga esquerda (se for diferente)")
     p.add_argument("--manga-dir", help="arte da manga direita (se for diferente)")
     p.add_argument("--logo", action="append", metavar="N=ARQUIVO",
-                   help="logo no marcador N do molde: 1 peito direito, 2 peito esquerdo, 3 manga esq., 4 manga dir.")
+                   help="logo no marcador N do molde: 1 peito direito, 2 peito esquerdo, 3 manga esq., "
+                        "4 manga dir.; shorts: D1, D2 (perna direita), E1, E2 (perna esquerda)")
     p.add_argument("--elemento", action="append", metavar="NOME=ARQUIVO",
                    help="imagem de um elemento de [uniformes.elementos] (ex.: patrocinio_costas_topo=marca.png)")
-    p.add_argument("--tipo-manga", choices=["curta", "longa", "sem"], default="curta")
+    p.add_argument("--tipo-manga", choices=["auto", "curta", "curta_barra", "longa", "raglan", "sem"], default="auto",
+                   help="auto: curta; na raglan, a raglan; na regata, nenhuma")
+    p.add_argument("--gola-arte", help="arte da gola (polo); padrão: a das costas")
+    p.add_argument("--short", help="arte do short (as duas pernas)")
+    p.add_argument("--short-dir", help="arte da perna direita (se for diferente)")
+    p.add_argument("--short-esq", help="arte da perna esquerda (se for diferente)")
+    p.add_argument("--short-faixa", help="arte da faixa lateral do short")
+    p.add_argument("--conjunto", choices=["tudo", "camisa", "short"], default="tudo",
+                   help="em modelos com camisa e short (basquete): gerar tudo, só a camisa ou só o short")
     p.add_argument("--gola", choices=["careca", "v"], default="careca")
     p.add_argument("--numero-frente", action="store_true", help="também coloca o número na frente")
     p.add_argument("--tamanho", help="tamanho para todos, se a planilha não tiver a coluna Tamanho")

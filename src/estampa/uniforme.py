@@ -36,7 +36,11 @@ from .peca import _fonte
 
 Image.MAX_IMAGE_PIXELS = None
 
-LADOS_ARTE = ("frente", "costas", "manga_esq", "manga_dir")
+LADOS_ARTE = ("frente", "costas", "manga_esq", "manga_dir", "gola", "short_dir", "short_esq", "short_faixa")
+# de onde vem a arte quando a parte não tem arte própria
+ARTE_RESERVA = {"gola": ("costas",), "short_esq": ("short_dir",), "short_dir": ("short_esq",),
+                "short_faixa": ("short_dir", "short_esq")}
+TIPOS_MANGA = ("auto", "curta", "curta_barra", "longa", "raglan", "sem")
 
 
 # ---------------------------------------------------------------- configuração
@@ -172,18 +176,41 @@ class PedidoUniforme:
     artes: dict[str, Path]            # frente / costas / manga_esq / manga_dir
     logos: dict[str, Path] = field(default_factory=dict)      # "1".."4"
     imagens: dict[str, Path] = field(default_factory=dict)    # elementos do tipo imagem (patrocínios)
-    manga: str = "curta"              # curta | longa | sem (regata)
+    manga: str = "auto"               # auto | curta | curta_barra | longa | raglan | sem (regata)
     gola: str = "careca"              # careca | v
     numero_frente: bool = False
+    conjunto: str = "tudo"            # tudo | camisa | short (modelos com camisa e short, ex.: basquete)
 
     def partes(self, modelo: Modelo, tamanho: str) -> list[tuple[str, str]]:
-        """(parte do molde, lado da arte) que formam a peça."""
+        """(parte do molde, lado da arte) que formam a peça.
+
+        Entram todas as partes do tamanho, menos as variantes não escolhidas
+        (outra gola, outro tipo de manga) e, com `conjunto`, a camisa ou o short.
+        """
         partes = modelo.tamanho(tamanho).partes
-        frente = f"frente_{self.gola}" if f"frente_{self.gola}" in partes else next(
-            (p for p in partes if p.startswith("frente")), None)
-        lista = [(frente, "frente"), ("costas", "costas")]
-        if self.manga != "sem":
-            lista += [(f"manga_{self.manga}_esq", "manga_esq"), (f"manga_{self.manga}_dir", "manga_dir")]
+        lista: list[tuple[str | None, str]] = []
+        tem_camisa = any(p.startswith(("frente", "costas")) for p in partes)
+        tem_short = any(p.startswith("short_") for p in partes)
+        if tem_camisa and self.conjunto in ("tudo", "camisa"):
+            frente = next((p for p in (f"frente_{self.gola}", "frente") if p in partes), None) or next(
+                (p for p in sorted(partes) if p.startswith("frente")), None)
+            lista += [(frente, "frente"), ("costas", "costas")]
+            manga = self.manga
+            if manga == "auto":  # curta; na raglan, a raglan; na regata, nenhuma
+                manga = next((t for t in ("curta", "raglan", "longa") if f"manga_{t}_esq" in partes), "sem")
+            if manga != "sem":
+                lista += [(f"manga_{manga}_esq", "manga_esq"), (f"manga_{manga}_dir", "manga_dir")]
+            lista += [(p, "gola") for p in sorted(partes) if p == "gola" or p.startswith(("vivo_", "comum"))]
+        if tem_short and self.conjunto in ("tudo", "short"):
+            for p in sorted(partes):
+                if p.startswith("short_faixa"):
+                    lista.append((p, "short_faixa"))
+                elif p.startswith("short_dir"):
+                    lista.append((p, "short_dir"))
+                elif p.startswith("short_esq"):
+                    lista.append((p, "short_esq"))
+        if not lista:
+            raise ValueError(f"o modelo {modelo.codigo} não tem peças para o conjunto '{self.conjunto}'")
         faltando = [p for p, _ in lista if p is None or p not in partes]
         if faltando:
             raise ValueError(f"o tamanho {tamanho} do modelo {modelo.codigo} não tem: {', '.join(map(str, faltando))}")
@@ -267,9 +294,10 @@ def renderizar_parte(ped: PedidoUniforme, jogador: Jogador, parte_molde: str, la
     k = dpi / 2.54
     peca = Image.new("RGBA", (w, h), (255, 255, 255, 0))
 
-    if lado in ped.artes:
+    arte = ped.artes.get(lado) or next((ped.artes[r] for r in ARTE_RESERVA.get(lado, ()) if r in ped.artes), None)
+    if arte:
         qw, qh = modelo.quadro(parte_molde)
-        quadro = _arte_no_quadro(str(ped.artes[lado]), qw, qh, dpi)
+        quadro = _arte_no_quadro(str(arte), qw, qh, dpi)
         x0 = (quadro.width - w) // 2
         y0 = 0 if cfg.alinhamento == "topo" else (quadro.height - h) // 2
         peca.paste(quadro.crop((x0, y0, x0 + w, y0 + h)), (0, 0))

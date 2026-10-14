@@ -35,6 +35,11 @@ estampa uniforme --modelo casual --pedido TIME-01 --jogadores time.xlsx \
   --logo 1=escudo.png --logo 2=patrocinio.png --logo 3=escudo.png --logo 4=escudo.png \
   --elemento patrocinio_costas_topo=marca1.png --elemento patrocinio_costas_base=marca2.png \
   --gola careca --tipo-manga curta --numero-frente
+
+# basquete: regata + short, logos do short nos retângulos D1/D2 e E1/E2
+estampa uniforme --modelo basquete --pedido BASQ-1 --jogadores time.xlsx \
+  --frente frente.png --costas costas.png --short short.png \
+  --logo 1=escudo.png --logo D1=patrocinio.png --logo E1=escudo.png
 ```
 
 - **Planilha**: a mesma do SpeedCorel (`Nomes`, `Números`) funciona; acrescente
@@ -45,13 +50,35 @@ estampa uniforme --modelo casual --pedido TIME-01 --jogadores time.xlsx \
   proporção é cortada pelo centro, nunca esticada.
 - `--tipo-manga longa`, `--gola v`, `--tipo-manga sem` (regata).
 
-## Importação dos moldes (layout SpeedCorel)
+## Modelos testados (PDFs SpeedCorel)
 
-- molde = forma com linha de contorno (o preenchimento pode ter qualquer cor);
-- marcador de logo = forma escura com o número 1–4 dentro;
-- tamanho = título acima da coluna (2, 4… 14, BLPP… BLXG, PP… XGG);
+| PDF | Modelos gerados | Tamanhos |
+|---|---|---|
+| CASUAL tradicionais / ESPORTIVO camisetas | `casual`, `esportivo` | 2–14, BLPP–BLXG, PP–XGG |
+| CASUAL POLO | `polo-homem`, `polo-mulher` (com gola e manga com barra) | PP–EXG, BLPP–BLXGG* |
+| CASUAL raglan | `raglan-unissex`, `raglan-infantil`, `raglan-mulher` | PP–EXG, 2–16, BLP–BLGG |
+| CASUAL regata | `regata` | PP–EXG |
+| ESPORTIVO basquete | `basquete` (regata + short + gola + filetes) | PP–XG |
+| ESPORTIVO shorts | `shorts-feminino`, `shorts-masculino` | P–XG, PP–XG |
+
+\* Onde o PDF tem os tamanhos só desenhados em curvas, os nomes saem pela
+ordem de tamanho da peça. Confira na prévia e corrija se precisar:
+`estampa moldes importar POLO.pdf --modelo polo --nomes "polo-mulher=BLPP,BLP,BLM,BLG,BLGG,BLXG,BLXGG"`.
+
+## Importação dos moldes (layouts SpeedCorel)
+
+- peça = forma com contorno ou só preenchida; o que fica dentro de outra peça
+  (marcador, faixa de punho, etiqueta, linha de costura) é ignorado;
+- marcadores: elipse escura com 1–4 (peito e mangas); retângulo azul-marinho
+  = perna direita do short (D1, D2), vermelho = perna esquerda (E1, E2);
+- tamanho: título acima da coluna, ou escrito à esquerda da linha (basquete),
+  ou pela ordem de tamanho (polo, raglan, regata, shorts), com o nome do
+  grupo à esquerda (POLO HOMEM) ou acima (Feminino | Masculino);
 - parte: 2 marcadores = frente (a de cima gola careca, a de baixo gola V),
-  nenhum = costas, 1 = manga (a mais alta é a longa; 3 = esquerda, 4 = direita).
+  nenhum = costas ou gola (faixa), 1 = manga (3 = esquerda, 4 = direita;
+  longa/curta pela altura; curta com barra na polo; raglan na raglan),
+  short_dir/short_esq pelos retângulos, faixas estreitas = faixa do short
+  ou filete (vivo).
 
 Os moldes importados não vão para o git: são licenciados para a empresa.
 A macro da SpeedCorel é protegida por senha e **não foi aberta**; o sistema

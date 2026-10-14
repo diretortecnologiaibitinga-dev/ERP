@@ -136,94 +136,349 @@ def _slug(texto: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", texto.lower()).strip("-") or "modelo"
 
 
-def importar_pdf(caminho: Path | str, codigo: str | None = None, largura_min_cm: float = 5.0) -> Modelo:
-    """Lê um PDF de moldes no layout SpeedCorel e monta a biblioteca do modelo.
+NOMES_PADRAO = {
+    "adulto": ["PP", "P", "M", "G", "GG", "XG", "EXG", "EXGG"],
+    "infantil": ["2", "4", "6", "8", "10", "12", "14", "16"],
+    "feminino": ["BLPP", "BLP", "BLM", "BLG", "BLGG", "BLXG", "BLXGG"],
+}
+PALAVRAS_GRADE = {"INFANTIL": "infantil", "KIDS": "infantil", "MULHER": "feminino", "FEMININO": "feminino",
+                  "FEMININA": "feminino", "BABY": "feminino", "HOMEM": "adulto", "MASCULINO": "adulto",
+                  "UNISSEX": "adulto", "ADULTO": "adulto"}
 
-    Regras do layout:
-    - molde = forma com linha de contorno (o preenchimento pode ter qualquer
-      cor); marcador de logo = forma escura sem contorno dentro dele, com o
-      número (1-4) escrito;
-    - o tamanho de cada molde é o título de tamanho mais próximo acima da coluna;
-    - parte: 2 marcadores = frente, nenhum = costas, 1 = manga (a mais alta é a
-      longa); frentes diferentes na mesma coluna: a de cima é gola careca, a de
-      baixo gola V; mangas: a da esquerda (marcador 3) é a esquerda.
-    """
+
+def _nomes_ancorados(grade: str, escritos: list[str | None]) -> list[str]:
+    """Nomes por ordem; se alguma peça traz o tamanho escrito (ex.: "FEM. P"), alinha a lista por ele."""
+    n = len(escritos)
+    for lista in (NOMES_PADRAO[grade], NOMES_PADRAO["adulto"], NOMES_PADRAO["feminino"], NOMES_PADRAO["infantil"]):
+        for i, e in enumerate(escritos):
+            if e and e in lista:
+                inicio = lista.index(e) - i
+                if inicio >= 0 and inicio + n <= len(lista) and all(
+                        x is None or x == lista[inicio + k] for k, x in enumerate(escritos)):
+                    return lista[inicio:inicio + n]
+    return nomes_padrao(grade, n)
+
+
+def nomes_padrao(grade: str, n: int) -> list[str]:
+    """Nomes por ordem de tamanho (menor → maior) quando o PDF não traz o texto dos tamanhos."""
+    lista = NOMES_PADRAO[grade]
+    if grade == "infantil":
+        return lista[-n:] if n <= len(lista) else [f"T{i}" for i in range(1, n + 1)]
+    if grade == "feminino" and n <= 4:
+        return ["BLP", "BLM", "BLG", "BLGG"][:n]
+    return lista[:n] if n <= len(lista) else lista + [f"T{i}" for i in range(len(lista) + 1, n + 1)]
+
+
+def _retangulo(c: dict) -> bool:
+    """Retângulo alinhado (molduras, faixas): todos os pontos nos cantos da caixa."""
+    pts = [p for cmd, *ps in c["path"] for p in ps]
+    tol = 0.5
+    return all((abs(x - c["x0"]) < tol or abs(x - c["x1"]) < tol) and
+               (abs(y - c["top"]) < tol or abs(y - c["bottom"]) < tol) for x, y in pts)
+
+
+def _ler_pdf(caminho: Path, largura_min_cm: float):
     import pdfplumber
 
-    caminho = Path(caminho)
     with pdfplumber.open(caminho) as pdf:
         pg = pdf.pages[0]
         curvas = list(pg.curves) + list(pg.rects)
         palavras = pg.extract_words(keep_blank_chars=False)
 
-    moldes, vistos = [], set()
+    # peça = forma (com contorno ou só preenchida) de alguns cm que não seja retângulo
+    candidatos, vistos = [], set()
     for c in curvas:
-        if not (c.get("stroke") and c.get("path") and len(c["path"]) > 8
-                and (c["x1"] - c["x0"]) * PT_PARA_CM >= largura_min_cm):
+        if not ((c.get("stroke") or c.get("fill")) and c.get("path") and len(c["path"]) >= 4
+                and (c["x1"] - c["x0"]) * PT_PARA_CM >= largura_min_cm) or _retangulo(c):
             continue
         chave = tuple(round(c[k]) for k in ("x0", "top", "x1", "bottom"))
-        if chave not in vistos:  # o mesmo contorno pode vir repetido
+        if chave not in vistos:  # preenchimento e contorno da mesma peça vêm separados
             vistos.add(chave)
-            moldes.append(c)
-    # marcadores de logo: formas escuras de alguns cm (as letras das etiquetas em curva têm ~0,5 cm)
-    marcadores = [c for c in curvas if c.get("fill") and (g := _cinza(c.get("non_stroking_color"))) is not None
-                  and g < 0.3 and c.get("path") and (c["x1"] - c["x0"]) * PT_PARA_CM >= 2.0]
+            candidatos.append(c)
+    # o que está dentro de outra peça é decoração (marcador, faixa de punho, etiqueta em
+    # curva, linha de costura): fica só a peça de fora
+    area = lambda c: (c["x1"] - c["x0"]) * (c["bottom"] - c["top"])
+    moldes = [b for b in candidatos if not any(
+        a is not b and _dentro(b, a, 0.5 / PT_PARA_CM) and area(b) < area(a) for a in candidatos)]
+    marcadores = [c for c in curvas if c.get("fill") and _tipo_marcador(c.get("non_stroking_color"))
+                  and c.get("path") and 2.0 <= (c["x1"] - c["x0"]) * PT_PARA_CM <= 25]
+    return moldes, marcadores, palavras
+
+
+def _tipo_marcador(cor) -> str | None:
+    """Cinza-escuro = logos 1-4; azul-marinho = perna direita do short; vermelho = perna esquerda."""
+    if not isinstance(cor, (list, tuple)) or len(cor) < 3:
+        return "logo" if isinstance(cor, (int, float)) and cor < 0.3 else None
+    r, g, b = cor[:3]
+    if max(r, g, b) - min(r, g, b) < 0.06 and (r + g + b) / 3 < 0.3:
+        return "logo"
+    if b > 0.3 and r < 0.15 and g < 0.15:
+        return "direita"
+    if r > 0.7 and g < 0.4 and b < 0.4:
+        return "esquerda"
+    return None
+
+
+def _peca(m, marcadores, palavras) -> dict:
+    x0, top = m["x0"], m["top"]
+    pontos = [((x - x0) * PT_PARA_CM, (y - top) * PT_PARA_CM) for x, y in _poligono(m)]
+    logos = {}
+    dentro = sorted((k for k in marcadores if _dentro(k, m) and (k["x1"] - k["x0"]) < (m["x1"] - m["x0"]) * 0.6),
+                    key=lambda k: k["x0"])
+    contagem = {"logo": 0, "direita": 0, "esquerda": 0}
+    for mk in dentro:
+        tipo = _tipo_marcador(mk.get("non_stroking_color"))
+        contagem[tipo] += 1
+        if tipo == "logo":
+            nums = [w["text"] for w in palavras if _dentro(w, mk, 1) and w["text"] in ("1", "2", "3", "4")]
+            slot = nums[0] if nums else str(contagem["logo"])
+        else:  # short: D1, D2 (perna direita) / E1, E2 (perna esquerda), da esquerda para a direita
+            slot = f"{tipo[0].upper()}{contagem[tipo]}"
+        logos[slot] = (round(((mk["x0"] + mk["x1"]) / 2 - x0) * PT_PARA_CM, 2),
+                       round(((mk["top"] + mk["bottom"]) / 2 - top) * PT_PARA_CM, 2),
+                       round((mk["x1"] - mk["x0"]) * PT_PARA_CM, 2), round((mk["bottom"] - mk["top"]) * PT_PARA_CM, 2))
+    parte = Parte(round((m["x1"] - x0) * PT_PARA_CM, 2), round((m["bottom"] - top) * PT_PARA_CM, 2),
+                  [(round(x, 2), round(y, 2)) for x, y in pontos], logos)
+    return {"x": x0, "y": top, "parte": parte}
+
+
+def _classificar(itens: list[dict], raglan: bool = False) -> dict[str, Parte]:
+    """Nomeia as partes de um tamanho.
+
+    2 marcadores = frente (a de cima gola careca, a de baixo gola V; só uma = "frente");
+    nenhum = costas, ou gola se for uma faixa (bem mais larga que alta);
+    1 marcador = manga (3 = esquerda, 4 = direita): alturas bem diferentes = longa
+    e curta; parecidas = curta e curta com barra (a de baixo); raglan = manga_raglan.
+    """
+    partes: dict[str, Parte] = {}
+    numericos = lambda i: [k for k in i["parte"].logos if k.isdigit()]
+    perna = lambda i: "dir" if any(k.startswith("D") for k in i["parte"].logos) else (
+        "esq" if any(k.startswith("E") for k in i["parte"].logos) else None)
+    shorts = [i for i in itens if perna(i)]
+    for lado in ("dir", "esq"):
+        pecas = sorted((i for i in shorts if perna(i) == lado), key=lambda i: i["x"])
+        sufixos = [""] if len(pecas) == 1 else [f"_{c}" for c in "abcdef"]
+        for suf, i in zip(sufixos, pecas):
+            partes[f"short_{lado}{suf}"] = i["parte"]
+    itens = [i for i in itens if not perna(i)]
+    # faixas estreitas sem logo (faixa lateral do short, vivo da regata)
+    estreitas = [i for i in itens if not i["parte"].logos and i["parte"].largura_cm < 0.3 * i["parte"].altura_cm]
+    centro = lambda i: i["x"] + i["parte"].largura_cm / PT_PARA_CM / 2
+    vivos = 0
+    for i in sorted(estreitas, key=lambda i: i["x"]):
+        if shorts and min(s["x"] for s in shorts) <= centro(i) <= max(centro(s) * 2 - s["x"] for s in shorts):
+            perto = min(shorts, key=lambda s: abs(centro(s) - centro(i)))
+            nome = f"short_faixa_{perna(perto)}"
+            n = 2
+            while nome in partes:
+                nome, n = f"short_faixa_{perna(perto)}_{n}", n + 1
+            partes[nome] = i["parte"]
+        else:
+            vivos += 1
+            partes[f"vivo_{vivos}"] = i["parte"]
+    itens = [i for i in itens if i not in estreitas]
+    frentes = sorted((i for i in itens if len(numericos(i)) >= 2), key=lambda i: i["y"])
+    if len(frentes) == 1:
+        partes["frente"] = frentes[0]["parte"]
+    else:
+        for nome, f in zip(("frente_careca", "frente_v", "frente_3"), frentes):
+            partes[nome] = f["parte"]
+    sem_logo = [i for i in itens if not i["parte"].logos]
+    golas = [i for i in sem_logo if i["parte"].largura_cm > 2.5 * i["parte"].altura_cm]
+    costas = [i for i in sem_logo if i not in golas]
+    if golas:
+        partes["gola"] = max(golas, key=lambda g: g["parte"].largura_cm)["parte"]
+    if costas:
+        partes["costas"] = max(costas, key=lambda c: c["parte"].altura_cm)["parte"]
+    mangas = [i for i in itens if len(numericos(i)) == 1]
+    if not mangas:
+        return partes
+    # linhas de mangas (pares esquerda/direita na mesma altura da página)
+    linhas: list[list[dict]] = []
+    for m in sorted(mangas, key=lambda m: m["y"]):
+        if linhas and abs(m["y"] - linhas[-1][0]["y"]) * PT_PARA_CM < 3:
+            linhas[-1].append(m)
+        else:
+            linhas.append([m])
+    if raglan:
+        tipos = ["raglan"] + [f"raglan_{i}" for i in range(2, len(linhas) + 1)]
+    elif len(linhas) == 1:
+        tipos = ["curta"]
+    else:
+        alturas = [max(m["parte"].altura_cm for m in l) for l in linhas]
+        if min(alturas) < 0.75 * max(alturas):
+            tipos = ["longa" if a == max(alturas) else "curta" for a in alturas]
+        else:
+            tipos = ["curta", "curta_barra"] + [f"curta_{i}" for i in range(3, len(linhas) + 1)]
+    for tipo, linha in zip(tipos, linhas):
+        for m in linha:
+            lado = "esq" if "3" in m["parte"].logos else "dir" if "4" in m["parte"].logos else (
+                "esq" if m is min(linha, key=lambda o: o["x"]) else "dir")
+            partes.setdefault(f"manga_{tipo}_{lado}", m["parte"])
+    return partes
+
+
+def importar_pdf_modelos(caminho: Path | str, codigo: str | None = None,
+                         tamanhos: dict[str, list[str]] | None = None, largura_min_cm: float = 2.5) -> list[Modelo]:
+    """Lê um PDF de moldes (layouts SpeedCorel) e devolve um ou mais modelos.
+
+    Layout em colunas: título do tamanho acima de cada coluna (ex.: casual
+    tradicionais) → um modelo. Layout em linhas: cada linha tem um nome à
+    esquerda (POLO HOMEM, RAGLAN INFANTIL...) e as colunas não têm título
+    (o tamanho está desenhado em curvas) → um modelo por linha, com os
+    tamanhos nomeados por ordem de tamanho da peça. `tamanhos` troca esses
+    nomes: {"polo-homem": ["P", "M", ...]} (do menor para o maior).
+    """
+    caminho = Path(caminho)
+    moldes, marcadores, palavras = _ler_pdf(caminho, largura_min_cm)
     if not moldes:
         raise ValueError(f"{caminho.name}: nenhum molde encontrado (formas com linha de contorno)")
+    base = codigo or _slug(caminho.stem)
+    raglan = "raglan" in (base + caminho.stem).lower()
 
     topo = min(m["top"] for m in moldes)
     titulos = []
     for w in palavras:
         t = normalizar_tamanho(w["text"])
-        if t == "BLX":
-            t = "BLXG"
+        t = "BLXG" if t == "BLX" else t
         if t in ORDEM and w["bottom"] <= topo + 1:
-            titulos.append((t, (w["x0"] + w["x1"]) / 2, w["top"]))
-    if not titulos:
-        raise ValueError(f"{caminho.name}: nenhum título de tamanho (ex.: P, M, G, BLM, 10) acima dos moldes")
-    # num PDF de um tamanho só (título grande no topo), todo molde é daquele tamanho
-    def tamanho_de(m) -> str:
-        cx = (m["x0"] + m["x1"]) / 2
-        return min(titulos, key=lambda t: abs(t[1] - cx))[0]
+            titulos.append((t, (w["x0"] + w["x1"]) / 2))
+    if titulos:
+        limite = max(w["bottom"] for w in palavras if normalizar_tamanho(w["text"]) in ORDEM and w["bottom"] <= topo + 1)
+        por_tamanho: dict[str, list[dict]] = {}
+        for m in moldes:
+            if m["top"] < limite:  # gola/legenda desenhada acima dos títulos
+                continue
+            cx = (m["x0"] + m["x1"]) / 2
+            nome = min(titulos, key=lambda t: abs(t[1] - cx))[0]
+            por_tamanho.setdefault(nome, []).append(_peca(m, marcadores, palavras))
+        tams = {n: Tamanho(n, grade_do_tamanho(n), _classificar(it, raglan))
+                for n, it in sorted(por_tamanho.items(), key=lambda kv: ORDEM.get(kv[0], 99))}
+        return [Modelo(base, caminho.name, tams)]
 
-    por_tamanho: dict[str, list[dict]] = {}
-    for m in moldes:
-        x0, top = m["x0"], m["top"]
-        pontos = [((x - x0) * PT_PARA_CM, (y - top) * PT_PARA_CM) for x, y in _poligono(m)]
-        logos = {}
-        for n, mk in enumerate(sorted((k for k in marcadores if _dentro(k, m) and (k["x1"] - k["x0"]) < (m["x1"] - m["x0"]) * 0.6),
-                                      key=lambda k: k["x0"]), start=1):
-            nums = [w["text"] for w in palavras if _dentro(w, mk, 1) and w["text"] in ("1", "2", "3", "4")]
-            slot = nums[0] if nums else str(n)
-            logos[slot] = (round(((mk["x0"] + mk["x1"]) / 2 - x0) * PT_PARA_CM, 2),
-                           round(((mk["top"] + mk["bottom"]) / 2 - top) * PT_PARA_CM, 2),
-                           round((mk["x1"] - mk["x0"]) * PT_PARA_CM, 2), round((mk["bottom"] - mk["top"]) * PT_PARA_CM, 2))
-        por_tamanho.setdefault(tamanho_de(m), []).append({
-            "x": x0, "y": top, "parte": Parte(round((m["x1"] - x0) * PT_PARA_CM, 2),
-                                              round((m["bottom"] - top) * PT_PARA_CM, 2),
-                                              [(round(x, 2), round(y, 2)) for x, y in pontos], logos)})
+    # ---- tamanho escrito à esquerda de cada linha (ex.: basquete)
+    esquerda = min(m["x0"] for m in moldes)
+    laterais = [(normalizar_tamanho(w["text"]), (w["top"] + w["bottom"]) / 2) for w in palavras
+                if normalizar_tamanho(w["text"]) in ORDEM and w["x1"] <= esquerda + 1
+                and (w["bottom"] - w["top"]) * PT_PARA_CM > 3]
+    if len(laterais) >= 2:
+        primeira = min(t[1] for t in laterais) - 50 / PT_PARA_CM
+        comuns = [_peca(m, marcadores, palavras) for m in moldes if m["bottom"] < primeira]
+        por_tamanho = {}
+        for m in moldes:
+            if m["bottom"] < primeira:
+                continue
+            meio = (m["top"] + m["bottom"]) / 2
+            nome = min(laterais, key=lambda t: abs(t[1] - meio))[0]
+            por_tamanho.setdefault(nome, []).append(_peca(m, marcadores, palavras))
+        tams = {}
+        for n, it in sorted(por_tamanho.items(), key=lambda kv: ORDEM.get(kv[0], 99)):
+            partes = _classificar(it, raglan)
+            for c in comuns:  # ex.: uma gola só, desenhada no topo, para todos os tamanhos
+                partes.setdefault("gola" if c["parte"].largura_cm > 2.5 * c["parte"].altura_cm else "comum", c["parte"])
+            tams[n] = Tamanho(n, grade_do_tamanho(n), partes)
+        return [Modelo(base, caminho.name, tams)]
 
-    tamanhos = {}
-    for nome, itens in sorted(por_tamanho.items(), key=lambda kv: ORDEM.get(kv[0], 99)):
-        partes: dict[str, Parte] = {}
-        frentes = sorted((i for i in itens if len(i["parte"].logos) >= 2), key=lambda i: i["y"])
-        costas = [i for i in itens if not i["parte"].logos]
-        mangas = [i for i in itens if len(i["parte"].logos) == 1]
-        for nome_parte, f in zip(("frente_careca", "frente_v", "frente_3"), frentes):
-            partes[nome_parte] = f["parte"]
-        if costas:
-            partes["costas"] = max(costas, key=lambda c: c["parte"].altura_cm)["parte"]
-        if mangas:
-            alta = max(m["parte"].altura_cm for m in mangas)
-            for m in mangas:
-                tipo = "longa" if m["parte"].altura_cm > alta * 0.75 else "curta"
-                lado = "esq" if "3" in m["parte"].logos else "dir" if "4" in m["parte"].logos else None
-                if lado is None:
-                    lado = "esq" if not any(o is not m and o["x"] < m["x"] and abs(o["parte"].altura_cm - m["parte"].altura_cm) < 1
-                                            for o in mangas) else "dir"
-                partes.setdefault(f"manga_{tipo}_{lado}", m["parte"])
-        tamanhos[nome] = Tamanho(nome, grade_do_tamanho(nome), partes)
-    return Modelo(codigo or _slug(caminho.stem), caminho.name, tamanhos)
+    # ---- layout em linhas/colunas sem títulos de tamanho
+    linhas_txt: dict[int, list[dict]] = {}
+    for w in palavras:
+        linhas_txt.setdefault(round(w["top"] * PT_PARA_CM / 2), []).append(w)
+    rotulos = []
+    for linha in linhas_txt.values():
+        trechos: list[list[dict]] = []
+        for w in sorted(linha, key=lambda w: w["x0"]):  # "Feminino ... Masculino" na mesma linha = 2 rótulos
+            if trechos and w["x0"] - trechos[-1][-1]["x1"] < 15 / PT_PARA_CM:
+                trechos[-1].append(w)
+            else:
+                trechos.append([w])
+        for ws in trechos:
+            texto = " ".join(w["text"] for w in ws if w["text"].isalpha()).upper()
+            if any(p in texto.split() for p in PALAVRAS_GRADE):
+                rotulos.append((texto, (min(w["top"] for w in ws) + max(w["bottom"] for w in ws)) / 2,
+                                (min(w["x0"] for w in ws) + max(w["x1"] for w in ws)) / 2, max(w["bottom"] for w in ws)))
+
+    if rotulos and all(r[3] <= topo + 1 for r in rotulos):
+        # nomes dos grupos acima das peças (ex.: shorts Feminino | Masculino): grupos lado a lado
+        grupos: dict[str, list[dict]] = {}
+        for m in moldes:
+            cx = (m["x0"] + m["x1"]) / 2
+            grupos.setdefault(min(rotulos, key=lambda r: abs(r[2] - cx))[0], []).append(m)
+        faixas = [(r, g) for r, g in grupos.items()]
+    else:
+        blocos: list[list[dict]] = []
+        for m in sorted(moldes, key=lambda m: m["top"]):
+            if blocos and m["top"] <= max(o["bottom"] for o in blocos[-1]) + 15 / PT_PARA_CM:
+                blocos[-1].append(m)
+            else:
+                blocos.append([m])
+        faixas = []
+        for bloco in blocos:
+            meio = (min(m["top"] for m in bloco) + max(m["bottom"] for m in bloco)) / 2
+            faixas.append((min(rotulos, key=lambda r: abs(r[1] - meio))[0] if rotulos else "", bloco))
+
+    modelos = []
+    for rotulo, faixa in faixas:
+        grade = next((PALAVRAS_GRADE[p] for p in rotulo.split() if p in PALAVRAS_GRADE), "adulto")
+        cod = _slug(rotulo) if rotulo else base
+        if rotulo and not cod.startswith(base.split("-")[0]):
+            cod = f"{base}-{cod}"
+        celulas = []
+        for cel in _celulas(faixa, marcadores):
+            partes = _classificar([_peca(m, marcadores, palavras) for m in cel], raglan)
+            escrito = next((normalizar_tamanho(w["text"]) for w in palavras for m in cel
+                            if _dentro(w, m) and normalizar_tamanho(w["text"]) in ORDEM), None)
+            if partes:
+                celulas.append((max(v.largura_cm * v.altura_cm for v in partes.values()), partes, escrito))
+        celulas.sort(key=lambda c: c[0])
+        partes_col = [c[1] for c in celulas]
+        nomes = (tamanhos or {}).get(cod) or _nomes_ancorados(grade, [c[2] for c in celulas])
+        if len(nomes) != len(partes_col):
+            raise ValueError(f"{cod}: {len(partes_col)} tamanhos no PDF, mas {len(nomes)} nomes informados")
+        tams = {normalizar_tamanho(n): Tamanho(normalizar_tamanho(n), grade, p) for n, p in zip(nomes, partes_col)}
+        modelos.append(Modelo(cod, caminho.name, tams))
+    return modelos
+
+
+def _agrupar(moldes: list[dict], eixo: str, folga_cm: float) -> list[list[dict]]:
+    ini, fim = ("x0", "x1") if eixo == "x" else ("top", "bottom")
+    grupos: list[list[dict]] = []
+    for m in sorted(moldes, key=lambda m: m[ini]):
+        if grupos and m[ini] <= max(o[fim] for o in grupos[-1]) + folga_cm / PT_PARA_CM:
+            grupos[-1].append(m)
+        else:
+            grupos.append([m])
+    return grupos
+
+
+def _celulas(moldes: list[dict], marcadores: list[dict]) -> list[list[dict]]:
+    """Separa as peças de cada tamanho: em colunas (polo, raglan) ou em linhas (shorts).
+    Fica o arranjo em que nenhum tamanho tem duas frentes ou duas pernas iguais."""
+    def tipo(m):
+        tipos = [_tipo_marcador(k.get("non_stroking_color")) for k in marcadores
+                 if _dentro(k, m) and (k["x1"] - k["x0"]) < (m["x1"] - m["x0"]) * 0.6]
+        if tipos.count("logo") >= 2:
+            return "frente"
+        return next((t for t in tipos if t in ("direita", "esquerda")), None)
+
+    def valido(celulas):
+        for cel in celulas:
+            ts = [t for t in map(tipo, cel) if t]
+            if len(ts) != len(set(ts)):
+                return False
+        return True
+
+    opcoes = [_agrupar(moldes, "x", 4), _agrupar(moldes, "y", 2)]
+    boas = [o for o in opcoes if valido(o)] or opcoes[:1]
+    return max(boas, key=len)
+
+
+def importar_pdf(caminho: Path | str, codigo: str | None = None, largura_min_cm: float = 5.0) -> Modelo:
+    """Atalho para PDFs com um modelo só (layout em colunas, como o casual tradicionais)."""
+    modelos = importar_pdf_modelos(caminho, codigo, largura_min_cm=largura_min_cm)
+    if len(modelos) != 1:
+        raise ValueError(f"{Path(caminho).name} tem {len(modelos)} modelos ({', '.join(m.codigo for m in modelos)}); "
+                         "use importar_pdf_modelos")
+    return modelos[0]
 
 
 # ---------------------------------------------------------------- prévia

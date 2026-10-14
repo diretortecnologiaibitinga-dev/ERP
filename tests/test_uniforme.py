@@ -135,3 +135,19 @@ def test_cli_moldes_e_uniforme(time, tmp_path, capsys):
     assert len(list((tmp_path / "rip").iterdir())) == 8
     assert "1x M, 1x 8" in capsys.readouterr().out
     assert main(base + ["uniforme", "--modelo", "nao-existe", "--jogadores", str(planilha), "--pedido", "X"]) == 1
+
+
+def test_polo_com_gola_e_manga_automatica(time, tmp_path):
+    from estampa.moldes import importar_pdf_modelos
+    from estampa.moldes_exemplo import gerar_pdf_moldes_linhas
+    homem = importar_pdf_modelos(gerar_pdf_moldes_linhas(tmp_path / "polo.pdf"), "polo")[0]
+    homem.salvar(tmp_path / "polo-homem.json")
+    ped = PedidoUniforme("P1", tmp_path / "polo-homem.json", {"frente": time / "frente.png", "costas": time / "costas.png"})
+    from estampa.uniforme import _modelo
+    assert ped.partes(_modelo(str(tmp_path / "polo-homem.json")), "M") == [
+        ("frente", "frente"), ("costas", "costas"), ("manga_curta_esq", "manga_esq"),
+        ("manga_curta_dir", "manga_dir"), ("gola", "gola")]
+    r = list(exportar_time(ped, [Jogador("Lu", "5", "M")], ConfigUniformes(), DPI, tmp_path / "rip", processos=1))[0]
+    assert r.erro is None and len(r.arquivos) == 5
+    gola = Image.open(next(a for a in r.arquivos if a.name.endswith("_gola.png")))
+    assert gola.getpixel((gola.width // 2, gola.height // 2))[1] > 100  # gola usa a arte das costas (verde)

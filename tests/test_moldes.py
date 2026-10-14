@@ -58,3 +58,71 @@ def test_pdf_sem_moldes(tmp_path):
     c.save()
     with pytest.raises(ValueError, match="nenhum molde"):
         importar_pdf(tmp_path / "vazio.pdf")
+
+
+def test_layout_em_linhas_um_modelo_por_linha(tmp_path):
+    from estampa.moldes import importar_pdf_modelos
+    from estampa.moldes_exemplo import gerar_pdf_moldes_linhas
+    pdf = gerar_pdf_moldes_linhas(tmp_path / "polo.pdf")
+    homem, mulher = importar_pdf_modelos(pdf, "polo")
+    assert (homem.codigo, mulher.codigo) == ("polo-homem", "polo-mulher")
+    assert list(homem.tamanhos) == ["PP", "P", "M"] and list(mulher.tamanhos) == ["BLP", "BLM", "BLG"]
+    assert {t.grade for t in mulher.tamanhos.values()} == {"feminino"}
+    pp = homem.tamanho("PP")  # menor escala (0.9)
+    assert sorted(pp.partes) == ["costas", "frente", "gola", "manga_curta_dir", "manga_curta_esq"]
+    assert pp.partes["frente"].largura_cm == pytest.approx(45, abs=0.2)  # contorno externo, não o de costura
+    assert "3" in pp.partes["manga_curta_esq"].logos
+    nomes = importar_pdf_modelos(pdf, "polo", {"polo-homem": ["P", "M", "G"]})[0]
+    assert list(nomes.tamanhos) == ["P", "M", "G"]
+    with pytest.raises(ValueError, match="3 tamanhos no PDF"):
+        importar_pdf_modelos(pdf, "polo", {"polo-homem": ["P", "M"]})
+
+
+def test_importar_pdf_com_varios_modelos_avisa(tmp_path):
+    from estampa.moldes_exemplo import gerar_pdf_moldes_linhas
+    with pytest.raises(ValueError, match="2 modelos"):
+        importar_pdf(gerar_pdf_moldes_linhas(tmp_path / "polo.pdf"), "polo")
+
+
+def test_shorts_grupos_lado_a_lado_e_marcadores_coloridos(tmp_path):
+    """Layout dos shorts: Feminino | Masculino na mesma linha, peças só preenchidas
+    (sem contorno), retângulos azul-marinho (perna direita) e vermelhos (esquerda)."""
+    from reportlab.lib.colors import Color
+    from reportlab.lib.units import cm
+    from reportlab.pdfgen.canvas import Canvas
+
+    from estampa.moldes import importar_pdf_modelos
+
+    H = 260
+    c = Canvas(str(tmp_path / "shorts.pdf"), pagesize=(400 * cm, H * cm))
+    c.setFont("Helvetica-Bold", 900)
+    c.setFillColor(Color(0.2, 0.2, 0.2))
+    c.drawString(5 * cm, (H - 30) * cm, "Feminino")
+    c.drawString(210 * cm, (H - 30) * cm, "Masculino")
+
+    def perna(x, y, w, h, cor):
+        p = c.beginPath()
+        pts = [(0, 0), (w, 0), (w, h * 0.6), (w * 1.05, h), (-w * 0.05, h), (0, h * 0.6)]
+        p.moveTo((x + pts[0][0]) * cm, (H - y - pts[0][1]) * cm)
+        for px, py in pts[1:]:
+            p.lineTo((x + px) * cm, (H - y - py) * cm)
+        p.close()
+        c.setFillColor(Color(0.29, 0.29, 0.3))
+        c.drawPath(p, stroke=0, fill=1)
+        c.setFillColor(cor)
+        for rx, rw in ((0.2, 0.25), (0.6, 0.12)):
+            c.rect((x + w * rx) * cm, (H - y - h * 0.85) * cm, w * rw * cm, 0.12 * h * cm, stroke=0, fill=1)
+
+    for gx, escalas in ((5, (0.9, 1.0)), (210, (0.95, 1.05, 1.15))):
+        for linha, s in enumerate(escalas):
+            y = 40 + linha * 70
+            perna(gx, y, 60 * s, 45 * s, Color(0, 0, 0.4))
+            perna(gx + 90, y, 60 * s, 45 * s, Color(0.93, 0.2, 0.22))
+    c.save()
+
+    fem, masc = sorted(importar_pdf_modelos(tmp_path / "shorts.pdf", "shorts"), key=lambda m: m.codigo)
+    assert (fem.codigo, masc.codigo) == ("shorts-feminino", "shorts-masculino")
+    assert len(fem.tamanhos) == 2 and len(masc.tamanhos) == 3
+    t = next(iter(masc.tamanhos.values()))
+    assert sorted(t.partes) == ["short_dir", "short_esq"]
+    assert sorted(t.partes["short_dir"].logos) == ["D1", "D2"] and sorted(t.partes["short_esq"].logos) == ["E1", "E2"]
