@@ -11,6 +11,9 @@
     estampa painel --porta 8080          # tela da produção
     estampa aviso-teste                  # testa Telegram/WhatsApp/webhook configurados
     estampa demo                         # demonstração com dados fictícios no navegador
+    estampa moldes importar SPEEDCOREL_CASUAL_tradicionais.pdf --modelo casual
+    estampa uniforme --modelo casual --jogadores time.xlsx --pedido TIME-01 \
+        --frente frente.png --costas costas.png --manga manga.png --logo 1=escudo.png
 """
 
 from __future__ import annotations
@@ -170,6 +173,92 @@ def cmd_aviso_teste(args: argparse.Namespace) -> int:
     return 0 if _avisar(cat, teste, None, args.webhook) else 1
 
 
+def _pares(valores: list[str] | None, opcao: str) -> dict[str, Path]:
+    pares = {}
+    for v in valores or []:
+        if "=" not in v:
+            raise ValueError(f"{opcao} espera NOME=arquivo (ex.: {opcao} 1=escudo.png)")
+        chave, arquivo = v.split("=", 1)
+        pares[chave.strip()] = Path(arquivo.strip())
+    return pares
+
+
+def _modelo_json(cat, modelo: str) -> Path:
+    from .uniforme import carregar_config
+    cfg = carregar_config(cat.uniformes, cat.base)
+    caminho = Path(modelo) if modelo.endswith(".json") else cfg.pasta_moldes / f"{modelo}.json"
+    if not caminho.exists():
+        disponiveis = ", ".join(p.stem for p in sorted(cfg.pasta_moldes.glob("*.json"))) or "nenhum"
+        raise ValueError(f"modelo '{modelo}' não encontrado em {cfg.pasta_moldes} (importados: {disponiveis})")
+    return caminho
+
+
+def _quadros(modelo) -> None:
+    print("Quadros de edição (exporte cada arte nesta medida, ou na mesma proporção):")
+    for parte in modelo.partes():
+        w, h = modelo.quadro(parte)
+        print(f"  {parte:18} {w:6.1f} x {h:6.1f} cm")
+
+
+def cmd_moldes(args: argparse.Namespace) -> int:
+    from .moldes import Modelo, desenhar_previa, importar_pdf
+    from .uniforme import carregar_config
+    cat = carregar_catalogo(args.catalogo)
+    pasta = carregar_config(cat.uniformes, cat.base).pasta_moldes
+    if args.acao == "importar":
+        modelo = importar_pdf(args.alvo, args.modelo)
+        destino = pasta / f"{modelo.codigo}.json"
+        modelo.salvar(destino)
+        desenhar_previa(modelo, pasta / f"{modelo.codigo}_previa.png")
+        for t in modelo.tamanhos.values():
+            print(f"  {t.nome:6} {t.grade:9} {', '.join(sorted(t.partes))}")
+        print(f"{len(modelo.tamanhos)} tamanho(s) importado(s) → {destino} (confira {modelo.codigo}_previa.png)")
+        _quadros(modelo)
+    elif args.acao == "listar":
+        for arquivo in sorted(pasta.glob("*.json")):
+            m = Modelo.carregar(arquivo)
+            print(f"{m.codigo:20} {len(m.tamanhos)} tamanhos: {' '.join(m.tamanhos)}  (de {m.origem})")
+            _quadros(m)
+    else:
+        m = Modelo.carregar(_modelo_json(cat, args.alvo))
+        destino = Path(args.saida or f"{m.codigo}_previa.png")
+        desenhar_previa(m, destino, args.tamanhos)
+        print(destino)
+    return 0
+
+
+def cmd_uniforme(args: argparse.Namespace) -> int:
+    from .uniforme import PedidoUniforme, carregar_config, exportar_time, ler_jogadores
+    cat = carregar_catalogo(args.catalogo)
+    cfg = carregar_config(cat.uniformes, cat.base)
+    artes = {k: Path(v) for k, v in (("frente", args.frente), ("costas", args.costas),
+                                     ("manga_esq", args.manga_esq or args.manga),
+                                     ("manga_dir", args.manga_dir or args.manga)) if v}
+    ped = PedidoUniforme(args.pedido, _modelo_json(cat, args.modelo), artes, _pares(args.logo, "--logo"),
+                         _pares(args.elemento, "--elemento"), args.tipo_manga, args.gola, args.numero_frente)
+    for nome in ped.imagens:
+        if nome not in {e.nome for e in cfg.elementos}:
+            raise ValueError(f"elemento '{nome}' não existe em [uniformes.elementos]")
+    jogadores = ler_jogadores(args.jogadores, args.tamanho)
+    if args.saida:
+        pasta = Path(args.saida)
+    else:
+        pastas = cat.pastas_rip.get(cfg.transferencia)
+        pasta = pastas[0] if pastas else Path("saida")
+    inicio, arquivos, erros = time.monotonic(), 0, 0
+    for r in exportar_time(ped, jogadores, cfg, args.dpi or cat.config.dpi, pasta, args.formato, args.processos):
+        arquivos += len(r.arquivos)
+        if r.erro:
+            erros += 1
+            print(f"ERRO: {r.jogador.nome} ({r.jogador.tamanho}): {r.erro}", file=sys.stderr)
+    tamanhos = {}
+    for j in jogadores:
+        tamanhos[j.tamanho] = tamanhos.get(j.tamanho, 0) + j.quantidade
+    print(f"{len(jogadores)} jogador(es) — {', '.join(f'{n}x {t}' for t, n in tamanhos.items())}")
+    print(f"{arquivos} peça(s) em {pasta} ({time.monotonic() - inicio:.1f}s)" + (f", {erros} com erro" if erros else ""))
+    return 1 if erros else 0
+
+
 def cmd_demo(args: argparse.Namespace) -> int:
     from .demo import criar_demo
     from .demo_web import criar_servidor_demo
@@ -302,6 +391,37 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--porta", type=int, default=8080)
     p.add_argument("--host", default="0.0.0.0", help="0.0.0.0 = acessível pela rede local")
     p.set_defaults(func=cmd_painel)
+
+    p = sub.add_parser("moldes", help="biblioteca de moldes de vestuário (importar do PDF do Corel)")
+    p.add_argument("acao", choices=["importar", "listar", "previa"])
+    p.add_argument("alvo", nargs="?", help="importar: PDF dos moldes; previa: código do modelo")
+    p.add_argument("--modelo", help="importar: código do modelo (padrão: nome do arquivo)")
+    p.add_argument("--tamanhos", nargs="+", help="previa: só estes tamanhos")
+    p.add_argument("--saida", help="previa: arquivo PNG")
+    p.set_defaults(func=cmd_moldes)
+
+    p = sub.add_parser("uniforme", help="gera as peças de um time (arte + nome e número de cada jogador)")
+    p.add_argument("--modelo", required=True, help="código do modelo importado (ex.: casual)")
+    p.add_argument("--jogadores", required=True, help="planilha XLSX/CSV: Nome, Número, Tamanho (opcional), Quantidade")
+    p.add_argument("--pedido", required=True)
+    p.add_argument("--frente", help="arte da frente (quadro de edição)")
+    p.add_argument("--costas", help="arte das costas")
+    p.add_argument("--manga", help="arte das duas mangas")
+    p.add_argument("--manga-esq", help="arte da manga esquerda (se for diferente)")
+    p.add_argument("--manga-dir", help="arte da manga direita (se for diferente)")
+    p.add_argument("--logo", action="append", metavar="N=ARQUIVO",
+                   help="logo no marcador N do molde: 1 peito direito, 2 peito esquerdo, 3 manga esq., 4 manga dir.")
+    p.add_argument("--elemento", action="append", metavar="NOME=ARQUIVO",
+                   help="imagem de um elemento de [uniformes.elementos] (ex.: patrocinio_costas_topo=marca.png)")
+    p.add_argument("--tipo-manga", choices=["curta", "longa", "sem"], default="curta")
+    p.add_argument("--gola", choices=["careca", "v"], default="careca")
+    p.add_argument("--numero-frente", action="store_true", help="também coloca o número na frente")
+    p.add_argument("--tamanho", help="tamanho para todos, se a planilha não tiver a coluna Tamanho")
+    p.add_argument("--saida", help="pasta de saída (padrão: pasta do Flexi do equipamento em [rip])")
+    p.add_argument("--formato", choices=["png", "jpg"], default="png")
+    p.add_argument("--dpi", type=int)
+    p.add_argument("--processos", type=int)
+    p.set_defaults(func=cmd_uniforme)
 
     p = sub.add_parser("demo", help="demonstração com dados fictícios, aberta no navegador")
     p.add_argument("--pasta", default="demo", help="onde criar os dados da demonstração")

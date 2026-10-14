@@ -23,6 +23,9 @@ feito no Corel:
 - **ordem de serviço** para clientes que mandam a arte pronta: número
   sequencial, arquivos para o RIP, ficha em PDF para a produção e aviso por
   **Telegram, WhatsApp e painel da produção** (tela com as OS);
+- **uniformes de time**: importa os moldes do PDF do Corel (layout SpeedCorel,
+  20 tamanhos) e gera frente, costas e mangas de cada jogador com nome, número,
+  escudo e patrocínios, sem esticar a arte (veja [docs/UNIFORMES.md](docs/UNIFORMES.md));
 - **prensa ou calandra**: por padrão vai para a prensa (1,20 × 2,00 m) e, se
   não couber, para a calandra (1,80 m); rolo a rolo é escolhido como calandra;
 - recusa peças que não cabem em 1,80 m (rolo/calandra) em nenhuma direção;

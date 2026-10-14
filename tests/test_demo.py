@@ -31,6 +31,8 @@ def test_cenarios_da_demo(demo):
     assert any("rosto não encontrado" in a for a in _item(r, "ML-2000012399")["avisos"])
     assert len(_item(r, "ML-2000012345")["arquivos"]) == 1                 # casal: 2 fotos, 1 peça
     assert r["os"] == ["OS-000001", "OS-000002"]
+    time = _item(r, "TIME-FC")
+    assert time["erro"] is None and len(time["arquivos"]) == 20 and time["equipamento"] == "calandra"
 
 
 def _multipart(campos, arquivos):

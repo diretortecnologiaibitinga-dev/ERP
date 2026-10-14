@@ -112,6 +112,27 @@ def gerar_foto(destino: Path, tamanho: tuple[int, int], pos: tuple[float, float]
     foto.save(destino, quality=90)
 
 
+def gerar_listras(destino: Path, tamanho: tuple[int, int], c1, c2, passo: int) -> None:
+    w, h = tamanho
+    img = Image.new("RGB", tamanho, c1)
+    d = ImageDraw.Draw(img)
+    for x in range(-h, w, passo * 2):
+        d.polygon([(x, 0), (x + passo, 0), (x + passo + h, h), (x + h, h)], fill=c2)
+    img.save(destino)
+
+
+def gerar_logo(destino: Path, texto: str, tamanho: tuple[int, int], fundo, cor, redondo: bool = False) -> None:
+    w, h = tamanho
+    img = Image.new("RGBA", tamanho, (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    if redondo:
+        d.ellipse((4, 4, w - 4, h - 4), fill=fundo, outline=cor, width=max(4, w // 20))
+    else:
+        d.rounded_rectangle((0, 0, w - 1, h - 1), h // 5, fill=fundo)
+    _texto(d, (w / 2, h / 2), texto, round(h * (0.42 if redondo else 0.45)), cor)
+    img.save(destino)
+
+
 def gerar_paisagem(destino: Path, tamanho: tuple[int, int]) -> None:
     w, h = tamanho
     img = Image.new("RGB", tamanho, (135, 190, 235))
@@ -197,6 +218,54 @@ class ItemDemo:
     erro: str | None = None
 
 
+JOGADORES = [("Joãozinho", "11", "8"), ("Ana", "07", "BLM"), ("Lucas", "10", "M"),
+             ("Maximiliano Fernandes", "99", "M"), ("Rafael", "08", "XGG")]
+
+
+def _time_demo(pasta: Path, cat, dpi: int | None, processos: int | None) -> ItemDemo:
+    """Uniforme de time: moldes fictícios no layout SpeedCorel, importados e aplicados a 5 jogadores."""
+    from .moldes import importar_pdf
+    from .moldes_exemplo import gerar_pdf_moldes_exemplo
+    from .uniforme import PedidoUniforme, carregar_config, exportar_time, ler_jogadores
+
+    cfg = carregar_config(cat.uniformes, cat.base)
+    pdf = gerar_pdf_moldes_exemplo(pasta / "moldes_exemplo.pdf")
+    modelo = importar_pdf(pdf, "exemplo")
+    modelo.salvar(cfg.pasta_moldes / "exemplo.json")
+    from .moldes import desenhar_previa
+    desenhar_previa(modelo, cfg.pasta_moldes / "exemplo_previa.png")
+    t = pasta / "time"
+    t.mkdir()
+    gerar_listras(t / "frente.png", (2200, 2900), (10, 60, 140), (20, 110, 200), 140)
+    gerar_listras(t / "costas.png", (2200, 3000), (10, 60, 140), (20, 110, 200), 140)
+    gerar_listras(t / "manga.png", (1700, 2500), (240, 190, 20), (255, 215, 60), 100)
+    gerar_logo(t / "escudo.png", "FC", (600, 600), (255, 255, 255, 255), (10, 60, 140, 255), redondo=True)
+    gerar_logo(t / "patrocinio.png", "MERCADO BOM", (1400, 420), (255, 255, 255, 255), (200, 30, 30, 255))
+    gerar_logo(t / "patrocinio2.png", "AUTO PEÇAS", (1400, 380), (20, 20, 20, 255), (255, 255, 255, 255))
+    with open(t / "jogadores.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["Nome", "Número", "Tamanho"])
+        w.writerows(JOGADORES)
+    ped = PedidoUniforme(
+        "TIME-FC", cfg.pasta_moldes / "exemplo.json",
+        {"frente": t / "frente.png", "costas": t / "costas.png", "manga_esq": t / "manga.png", "manga_dir": t / "manga.png"},
+        logos={"1": t / "escudo.png", "2": t / "patrocinio.png", "3": t / "escudo.png", "4": t / "escudo.png"},
+        imagens={"patrocinio_costas_topo": t / "patrocinio.png", "patrocinio_costas_base": t / "patrocinio2.png"},
+        numero_frente=True)
+    jogadores = ler_jogadores(t / "jogadores.csv")
+    arquivos, erros = [], []
+    for r in exportar_time(ped, jogadores, cfg, dpi or cat.config.dpi, pasta / "rip", "jpg", processos):
+        arquivos += r.arquivos
+        if r.erro:
+            erros.append(f"{r.jogador.nome}: {r.erro}")
+    return ItemDemo(
+        canal="Cliente local", pedido="TIME-FC", produto="Uniforme de time (camiseta)", quantidade=len(jogadores),
+        lados=1, equipamento=cfg.transferencia,
+        cenario="Time com 5 jogadores em 4 tamanhos (8, BLM, M, XGG): a arte não estica, escudo e "
+                "patrocínios no tamanho de cada faixa, nome e número de cada jogador",
+        arquivos=[str(Path(a).relative_to(pasta)) for a in arquivos], erro="; ".join(erros) or None)
+
+
 def criar_demo(pasta: Path, dpi: int | None = None, processos: int | None = None) -> dict:
     """Gera os dados fictícios e roda o fluxo completo. Devolve o resumo salvo em resultado.json."""
     pasta = pasta.resolve()
@@ -242,6 +311,8 @@ def criar_demo(pasta: Path, dpi: int | None = None, processos: int | None = None
             arquivos=[str(Path(a).relative_to(pasta)) for a in r.arquivos], avisos=r.avisos, erro=r.erro,
         ))
     tempo_lote = time.monotonic() - inicio
+
+    demo_itens.append(_time_demo(pasta, cat, dpi, processos))
 
     numeros = []
     for n, (cliente, entrega, obs, status, _) in enumerate(OS_CLIENTES, start=1):

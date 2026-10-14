@@ -308,6 +308,25 @@ class ResultadoItem:
 PASTA_GRAVANDO = "_gravando"
 
 
+def publicar(pasta: Path, gravar) -> list[Path]:
+    """Grava arquivos numa subpasta temporária e só então os move para `pasta`,
+    todos juntos: o RIP nunca pega um arquivo pela metade, e se `gravar` falhar
+    nada é publicado. `gravar(temporaria)` devolve os nomes gravados."""
+    temporaria = pasta / PASTA_GRAVANDO / uuid.uuid4().hex
+    try:
+        temporaria.mkdir(parents=True)
+        nomes = gravar(temporaria)
+        for nome in nomes:  # mesmo volume: os.replace é atômico
+            os.replace(temporaria / nome, pasta / nome)
+        return [pasta / n for n in nomes]
+    finally:
+        shutil.rmtree(temporaria, ignore_errors=True)
+        try:
+            (pasta / PASTA_GRAVANDO).rmdir()  # só some se estiver vazia (outros processos podem estar gravando)
+        except OSError:
+            pass
+
+
 def exportar_item(item: ItemPedido, op: OpcoesExportacao, pasta: Path | None = None) -> ResultadoItem:
     """Gera os arquivos de um item. Roda em processo separado, então um
     arquivo de arte com problema não derruba o lote inteiro.
@@ -318,35 +337,29 @@ def exportar_item(item: ItemPedido, op: OpcoesExportacao, pasta: Path | None = N
     """
     resultado = ResultadoItem(item.pedido)
     pasta = pasta or op.pasta_para(item.equipamento)[0]
-    temporaria = pasta / PASTA_GRAVANDO / uuid.uuid4().hex
     try:
         pecas, resultado.avisos = gerar_pecas([item], op.dpi, criar_ampliador(op.ampliador), op.espelhar,
                                               op.dpi_forcado, op.rosto)
-        temporaria.mkdir(parents=True)
-        prontos = []
-        for peca in pecas:
-            nome = f"{nome_arquivo(peca)}.{op.formato}"
-            if op.formato == "pdf":
-                salvar_pdf(peca, temporaria / nome, op.borda_mm)
-            else:
-                salvar_imagem(peca, temporaria / nome, dpi_do_produto(peca.produto, op.dpi, op.dpi_forcado),
-                              op.borda_mm)
-            prontos.append(nome)
-        for nome in prontos:  # mesmo volume: os.replace é atômico
-            os.replace(temporaria / nome, pasta / nome)
-            resultado.arquivos.append(pasta / nome)
+
+        def gravar(temporaria: Path) -> list[str]:
+            nomes = []
+            for peca in pecas:
+                nome = f"{nome_arquivo(peca)}.{op.formato}"
+                if op.formato == "pdf":
+                    salvar_pdf(peca, temporaria / nome, op.borda_mm)
+                else:
+                    salvar_imagem(peca, temporaria / nome, dpi_do_produto(peca.produto, op.dpi, op.dpi_forcado),
+                                  op.borda_mm)
+                nomes.append(nome)
+            return nomes
+
+        resultado.arquivos = publicar(pasta, gravar)
     except FileNotFoundError as e:
         resultado.erro = f"arquivo não encontrado: {Path(e.filename or '').name or e}"
     except ValueError as e:  # regras do produto/moldura: a mensagem já explica
         resultado.erro = str(e)
     except Exception as e:  # noqa: BLE001 — o erro vai para o relatório do lote
         resultado.erro = f"{type(e).__name__}: {e}"
-    finally:
-        shutil.rmtree(temporaria, ignore_errors=True)
-        try:
-            (pasta / PASTA_GRAVANDO).rmdir()  # só some se estiver vazia (outros processos podem estar gravando)
-        except OSError:
-            pass
     return resultado
 
 

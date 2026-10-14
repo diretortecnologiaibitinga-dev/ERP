@@ -233,7 +233,9 @@ PAGINA_PEDIDOS = """<!doctype html><html lang="pt-BR"><head><meta charset="utf-8
 <details><summary>Arquivos usados na demonstração</summary><p>
 <a href="/arquivo/pedidos_marketplace.csv">pedidos_marketplace.csv</a> ·
 <a href="/arquivo/os_cliente_1.csv">os_cliente_1.csv</a> · <a href="/arquivo/os_cliente_2.csv">os_cliente_2.csv</a> ·
-<a href="/arquivo/produtos.toml">produtos.toml</a></p></details></main>
+<a href="/arquivo/produtos.toml">produtos.toml</a> ·
+<a href="/arquivo/time/jogadores.csv">jogadores do time</a> · <a href="/arquivo/moldes_exemplo.pdf">moldes de exemplo (PDF)</a> ·
+<a href="/mini/moldes/exemplo_previa.png">moldes importados</a></p></details></main>
 <script>
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const enc=p=>p.split("/").map(encodeURIComponent).join("/");
@@ -247,8 +249,9 @@ const enc=p=>p.split("/").map(encodeURIComponent).join("/");
     [comAviso,"pedidos com aviso"],[falhas,"pedidos com erro"],[r.tempo_lote_s+" s","tempo do lote"]]
     .map(([v,t])=>`<div class="kpi"><b>${v}</b><span>${t}</span></div>`).join("");
   document.getElementById("itens").innerHTML=r.itens.map(i=>{
-    const minis=i.arquivos.slice(0,6).map(a=>`<a href="/arquivo/${enc(a)}" target="_blank" title="${esc(a.split("/").pop())}"><img loading="lazy" src="/mini/${enc(a)}" alt="${esc(a)}"></a>`).join("");
-    const mais=i.arquivos.length>6?`<span class="mais">+${i.arquivos.length-6} arquivos</span>`:"";
+    const lim=i.pedido==="TIME-FC"?20:6;
+    const minis=i.arquivos.slice(0,lim).map(a=>`<a href="/arquivo/${enc(a)}" target="_blank" title="${esc(a.split("/").pop())}"><img loading="lazy" src="/mini/${enc(a)}" alt="${esc(a)}"></a>`).join("");
+    const mais=i.arquivos.length>lim?`<span class="mais">+${i.arquivos.length-lim} arquivos</span>`:"";
     return `<div class="item${i.erro?" falhou":""}"><div class="cab"><span class="ped">${esc(i.pedido)}</span><span class="canal">${esc(i.canal)}</span></div>
       <div class="cen">${esc(i.cenario)}</div>
       <div class="meta">${i.quantidade}x ${esc(i.produto)}${i.lados==2?" · frente e verso":""} · <span class="tag ${esc(i.equipamento)}">${esc(i.equipamento).toUpperCase()}</span> · ${i.arquivos.length} arquivo(s)</div>

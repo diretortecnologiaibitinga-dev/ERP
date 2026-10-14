@@ -97,6 +97,14 @@ Modelo de dados: Produto (dimensões, margem, lados, espelhamento) ·
 mapeamento SKU → produto/variação · Pedido / ItemPedido · Arte (original,
 tratada, lado) · Peça / arquivo de produção · Lote (rolo) · Template de mockup.
 
+## Uniformes
+
+Camisetas de time (manga curta/longa, gola careca/V, regata, raglan, polo) com
+moldes por tamanho do modelo SpeedCorel: a arte é feita uma vez no quadro de
+edição e recortada em escala real em cada molde; logos, nome, número e
+patrocínios entram por posição e tamanho por grade. Detalhes em
+[UNIFORMES.md](UNIFORMES.md).
+
 ## Demonstração
 
 `estampa demo` gera dados fictícios, roda o fluxo completo e abre uma página

@@ -6,3 +6,5 @@ saida/
 ordens/
 modelos/*.onnx
 demo/
+moldes/*.json
+moldes/*_previa.png

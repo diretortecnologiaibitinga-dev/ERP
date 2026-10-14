@@ -29,6 +29,48 @@ separar_por_transferencia = false  # true = subpastas calandra/ e prensa/ na pas
 # prensa = ['\\PC-RIP\Flexi\Impressora1-Prensa', '\\PC-RIP\Flexi\Impressora2-Prensa']
 # calandra = ['\\PC-RIP\Flexi\Impressora1-Rolo']
 
+[uniformes]
+# Camisetas de time: moldes importados do PDF do Corel (estampa moldes importar).
+pasta_moldes = "moldes"
+transferencia = "calandra"    # peças de uniforme vão no rolo
+alinhamento = "topo"          # como cada molde se encaixa no quadro de edição: topo | centro
+contorno_mm = 0.5             # linha de corte em volta da peça
+cor_contorno = "#000000"
+fonte = ""                    # arquivo .ttf da fonte dos nomes e números (vazio = padrão)
+cor_texto = "#FFFFFF"
+cor_contorno_texto = "#000000"
+contorno_texto_mm = 1.2
+nome_maiusculo = true
+
+# Elementos posicionados: centro = [fração da largura, fração da altura] da peça;
+# medidas em cm por grade, para não esticar (o mesmo número em todos os adultos).
+[uniformes.elementos.nome]
+parte = "costas"
+centro = [0.5, 0.20]
+altura_cm = { infantil = 3.5, feminino = 4, adulto = 5 }
+
+[uniformes.elementos.numero]
+parte = "costas"
+centro = [0.5, 0.44]
+altura_cm = { infantil = 15, feminino = 18, adulto = 22 }
+
+[uniformes.elementos.numero_frente]   # ligado com --numero-frente
+parte = "frente"
+centro = [0.5, 0.45]
+altura_cm = { infantil = 6, feminino = 7, adulto = 9 }
+
+[uniformes.elementos.patrocinio_costas_topo]
+parte = "costas"
+centro = [0.5, 0.10]
+largura_cm = { infantil = 16, feminino = 20, adulto = 24 }
+altura_cm = { infantil = 4, feminino = 5, adulto = 6 }
+
+[uniformes.elementos.patrocinio_costas_base]
+parte = "costas"
+centro = [0.5, 0.80]
+largura_cm = { infantil = 16, feminino = 20, adulto = 26 }
+altura_cm = { infantil = 5, feminino = 6, adulto = 7 }
+
 [os]
 # Ordens de serviço (clientes que mandam a arte pronta)
 pasta = "ordens"          # uma pasta por OS: ficha em PDF, os.json, planilha
