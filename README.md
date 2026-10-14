@@ -64,6 +64,11 @@ artes, fotos, molduras e dois clientes locais, roda o fluxo real e abre
 Pelo celular, na mesma rede: `http://<ip-do-computador>:8080`.
 `estampa demo --recriar` apaga e gera tudo de novo.
 
+## Frontend
+
+Protótipo das telas em React com dados fictícios em [`frontend/`](frontend/README.md)
+(painel, pedidos, aprovação, atendimento, uniformes, produção, catálogo).
+
 ## Instalação
 
 ```bash
