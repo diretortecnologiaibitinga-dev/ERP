@@ -17,9 +17,10 @@ Problemas a resolver:
 ## Padrões de produção (definidos com a operação)
 
 - Duas impressoras com **área útil de 1,80 m**, rolos de 300 a 500 m.
-- O **RIP faz o espelhamento e o aproveitamento do rolo**: o sistema entrega
-  um arquivo por peça (espelhar fica como opção). Aceita PNG, PDF e JPG e
-  converte para PRN.
+- **RIP: Flexi (SAi/thinkSAI)**. Faz o espelhamento e o aproveitamento do rolo;
+  o sistema entrega um arquivo por peça nas pastas monitoradas dos Setups
+  (espelhar fica como opção). Aceita PNG, PDF e JPG e converte para PRN.
+  Configuração em [FLEXI.md](FLEXI.md).
 - **Sem emenda de painéis**: transferência na calandra até 1,80 m de largura;
   prensa plana de 2,00 × 1,20 m. Toda peça precisa caber em 1,80 m em uma direção.
 - **Prensa é o padrão**; calandra só no rolo a rolo — ou quando a peça não cabe

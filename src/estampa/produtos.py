@@ -88,6 +88,7 @@ class Catalogo:
     pasta_molduras: Path = Path("molduras")
     os: ConfigOS = ConfigOS()
     avisos: dict = field(default_factory=dict)
+    pastas_rip: dict[str, tuple[Path, ...]] = field(default_factory=dict)
 
     def cabe_na_prensa(self, produto: Produto) -> bool:
         w, h = produto.largura_total_cm, produto.altura_total_cm
@@ -138,5 +139,11 @@ def carregar_catalogo(caminho: Path | str = CATALOGO_PADRAO) -> Catalogo:
     }
     os_ = dict(dados.get("os", {}))
     os_["pasta"] = Path(caminho).resolve().parent / os_.get("pasta", "ordens")
+    pastas_rip = {}
+    for equipamento, pastas in dados.get("rip", {}).items():
+        if equipamento not in TRANSFERENCIAS or equipamento == "auto":
+            raise ValueError(f"[rip] {equipamento}: use prensa ou calandra")
+        lista = [pastas] if isinstance(pastas, str) else list(pastas)
+        pastas_rip[equipamento] = tuple(Path(p) for p in lista if p)
     return Catalogo(config=config, produtos=produtos, pasta_molduras=pasta_molduras, os=ConfigOS(**os_),
-                    avisos=dados.get("avisos", {}))
+                    avisos=dados.get("avisos", {}), pastas_rip=pastas_rip)

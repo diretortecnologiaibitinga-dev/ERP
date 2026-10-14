@@ -11,9 +11,10 @@ feito no Corel:
 - **código do pedido** na margem branca, com FRENTE/VERSO e cópia (ex.: `2/3`);
 - cores sempre em **sRGB** (converte CMYK, Adobe RGB etc.; corrige a rotação de fotos de celular);
 - aviso quando a arte tem resolução baixa para o tamanho final;
-- **lote**: gera **um arquivo por peça** para a pasta do RIP (que faz o
-  aproveitamento do rolo), em paralelo — ~1000 almofadas em poucos minutos;
-  um item com problema não para o lote e aparece no relatório;
+- **lote**: gera **um arquivo por peça** para as pastas monitoradas do
+  **Flexi** (que faz o espelhamento e o encaixe no rolo), em paralelo — ~1000
+  almofadas em poucos minutos; cada item chega completo e de uma vez, e um item
+  com problema não manda nada nem para o lote (veja [docs/FLEXI.md](docs/FLEXI.md));
 - produtos **sob medida** (capa de porta, fachada) com a medida vinda do pedido;
 - **sem espelhamento** por padrão (o RIP espelha); `--espelhar` quando precisar;
 - **fotomoldura**: PNG com transparência onde vai a foto (ex.: o coração); a
@@ -79,8 +80,9 @@ estampa peca --produto almofada-45 --pedido 250101ABC \
 # sob medida: largura x altura da estampa em cm
 estampa peca --produto capa-porta --largura 70 --altura 200 --pedido 250104 --frente porta.jpg
 
-# todos os pedidos da planilha: um arquivo por peça na pasta do RIP
-estampa lote exemplos/pedidos.csv --saida /caminho/da/pasta-do-rip
+# todos os pedidos da planilha: um arquivo por peça nas pastas do Flexi ([rip] no produtos.toml)
+estampa lote exemplos/pedidos.csv
+estampa lote exemplos/pedidos.csv --saida /outra/pasta   # tudo numa pasta só
 estampa lote exemplos/pedidos.csv --formato jpg      # ~3x mais rápido e leve
 
 # alternativa: peças já encaixadas no rolo de 1,80 m (PDF)

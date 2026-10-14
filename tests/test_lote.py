@@ -169,3 +169,43 @@ def test_separar_pastas_por_transferencia(catalogo, arte, tmp_path):
     list(exportar_itens(itens, op, processos=1))
     assert (tmp_path / "rip" / "prensa" / "almofada-45_A.png").exists()
     assert (tmp_path / "rip" / "calandra" / "almofada-45_B.png").exists()
+
+
+def test_entrega_atomica_e_item_com_erro_nao_manda_nada(catalogo, arte, tmp_path):
+    from estampa.lote import ItemPedido, Lado, OpcoesExportacao, exportar_item
+    produto = catalogo.produto("almofada-45")
+    rip = tmp_path / "rip"
+    rip.mkdir()
+    op = OpcoesExportacao(saida=rip, dpi=20)
+    ok = exportar_item(ItemPedido("A", produto, 2, [Lado((arte,)), Lado((arte,))]), op)
+    assert ok.erro is None and len(ok.arquivos) == 4
+    # frente boa, verso faltando: nenhum arquivo do item pode chegar ao RIP
+    ruim = exportar_item(ItemPedido("B", produto, 1, [Lado((arte,)), Lado((tmp_path / "falta.jpg",))]), op)
+    assert ruim.erro and not ruim.arquivos
+    assert sorted(f.name for f in rip.iterdir()) == sorted(a.name for a in ok.arquivos)  # sem _gravando
+
+
+def test_distribui_entre_impressoras_sem_separar_item(catalogo, arte, tmp_path):
+    from estampa.lote import ItemPedido, Lado, OpcoesExportacao, distribuir
+    produto = catalogo.produto("almofada-45")
+    p1, p2, rolo = tmp_path / "imp1", tmp_path / "imp2", tmp_path / "rolo"
+    op = OpcoesExportacao(saida=tmp_path, pastas_rip={"prensa": (p1, p2), "calandra": (rolo,)})
+    itens = [ItemPedido(str(n), produto, q, [Lado((arte,))], eq)
+             for n, (q, eq) in enumerate([(10, "prensa"), (3, "prensa"), (4, "prensa"), (5, "calandra"), (2, "prensa")])]
+    assert distribuir(itens, op) == [p1, p2, p2, rolo, p2]
+
+
+def test_cli_usa_pastas_do_flexi_e_saida_sobrepoe(arte, tmp_path):
+    toml = tmp_path / "produtos.toml"
+    rip = tmp_path / "flexi"
+    toml.write_text(f'[rip]\nprensa = ["{(rip / "prensa").as_posix()}"]\ncalandra = "{(rip / "rolo").as_posix()}"\n'
+                    '[produtos.almofada-45]\nnome = "A"\nlargura_cm = 45\naltura_cm = 45\n')
+    csv = tmp_path / "p.csv"
+    csv.write_text("pedido,produto,quantidade,arte_frente,transferencia\nA,almofada-45,1,arte.png,\n"
+                   "B,almofada-45,1,arte.png,calandra\n")
+    assert main(["--catalogo", str(toml), "lote", str(csv), "--dpi", "20", "--processos", "1"]) == 0
+    assert [f.name for f in (rip / "prensa").iterdir()] == ["almofada-45_A.png"]
+    assert [f.name for f in (rip / "rolo").iterdir()] == ["almofada-45_B.png"]
+    assert main(["--catalogo", str(toml), "lote", str(csv), "--dpi", "20", "--processos", "1",
+                 "--saida", str(tmp_path / "unica")]) == 0
+    assert len(list((tmp_path / "unica").iterdir())) == 2

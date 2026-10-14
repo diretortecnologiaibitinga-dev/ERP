@@ -12,6 +12,8 @@ from __future__ import annotations
 import csv
 import multiprocessing
 import os
+import shutil
+import uuid
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -286,6 +288,13 @@ class OpcoesExportacao:
     espelhar: bool | None = None
     rosto: bool = True
     separar_por_transferencia: bool = False
+    # pastas monitoradas do RIP por equipamento; vazio = usa `saida`
+    pastas_rip: dict[str, tuple[Path, ...]] = field(default_factory=dict)
+
+    def pasta_para(self, equipamento: str) -> list[Path]:
+        if self.pastas_rip.get(equipamento):
+            return list(self.pastas_rip[equipamento])
+        return [self.saida / equipamento if self.separar_por_transferencia else self.saida]
 
 
 @dataclass
@@ -296,39 +305,75 @@ class ResultadoItem:
     erro: str | None = None
 
 
-def exportar_item(item: ItemPedido, op: OpcoesExportacao) -> ResultadoItem:
+PASTA_GRAVANDO = "_gravando"
+
+
+def exportar_item(item: ItemPedido, op: OpcoesExportacao, pasta: Path | None = None) -> ResultadoItem:
     """Gera os arquivos de um item. Roda em processo separado, então um
-    arquivo de arte com problema não derruba o lote inteiro."""
+    arquivo de arte com problema não derruba o lote inteiro.
+
+    Os arquivos são gravados em `<pasta>/_gravando/` e só depois movidos para a
+    pasta monitorada do RIP, todos juntos: o RIP nunca pega um arquivo pela
+    metade, e um item que falha no meio não manda nada para impressão.
+    """
     resultado = ResultadoItem(item.pedido)
+    pasta = pasta or op.pasta_para(item.equipamento)[0]
+    temporaria = pasta / PASTA_GRAVANDO / uuid.uuid4().hex
     try:
         pecas, resultado.avisos = gerar_pecas([item], op.dpi, criar_ampliador(op.ampliador), op.espelhar,
                                               op.dpi_forcado, op.rosto)
-        pasta = op.saida / item.equipamento if op.separar_por_transferencia else op.saida
-        pasta.mkdir(parents=True, exist_ok=True)
+        temporaria.mkdir(parents=True)
+        prontos = []
         for peca in pecas:
-            destino = pasta / f"{nome_arquivo(peca)}.{op.formato}"
+            nome = f"{nome_arquivo(peca)}.{op.formato}"
             if op.formato == "pdf":
-                salvar_pdf(peca, destino, op.borda_mm)
+                salvar_pdf(peca, temporaria / nome, op.borda_mm)
             else:
-                salvar_imagem(peca, destino, dpi_do_produto(peca.produto, op.dpi, op.dpi_forcado), op.borda_mm)
-            resultado.arquivos.append(destino)
+                salvar_imagem(peca, temporaria / nome, dpi_do_produto(peca.produto, op.dpi, op.dpi_forcado),
+                              op.borda_mm)
+            prontos.append(nome)
+        for nome in prontos:  # mesmo volume: os.replace é atômico
+            os.replace(temporaria / nome, pasta / nome)
+            resultado.arquivos.append(pasta / nome)
     except FileNotFoundError as e:
         resultado.erro = f"arquivo não encontrado: {Path(e.filename or '').name or e}"
     except ValueError as e:  # regras do produto/moldura: a mensagem já explica
         resultado.erro = str(e)
     except Exception as e:  # noqa: BLE001 — o erro vai para o relatório do lote
         resultado.erro = f"{type(e).__name__}: {e}"
+    finally:
+        shutil.rmtree(temporaria, ignore_errors=True)
+        try:
+            (pasta / PASTA_GRAVANDO).rmdir()  # só some se estiver vazia (outros processos podem estar gravando)
+        except OSError:
+            pass
     return resultado
+
+
+def distribuir(itens: list[ItemPedido], op: OpcoesExportacao) -> list[Path]:
+    """Pasta de cada item. Com várias pastas para o mesmo equipamento (uma por
+    impressora), cada item vai para a que recebeu menos peças até agora;
+    frente, verso e cópias de um item ficam sempre juntos."""
+    carga: dict[Path, int] = {}
+    escolhidas = []
+    for item in itens:
+        opcoes = op.pasta_para(item.equipamento)
+        pasta = min(opcoes, key=lambda p: carga.get(p, 0))
+        carga[pasta] = carga.get(pasta, 0) + item.quantidade * len(item.lados)
+        escolhidas.append(pasta)
+    return escolhidas
 
 
 def exportar_itens(itens: list[ItemPedido], op: OpcoesExportacao, processos: int | None = None):
     """Exporta os itens em paralelo, devolvendo os resultados conforme ficam prontos."""
-    op.saida.mkdir(parents=True, exist_ok=True)
+    pastas = distribuir(itens, op)
+    for pasta in set(pastas):
+        pasta.mkdir(parents=True, exist_ok=True)
     processos = processos or os.cpu_count() or 1
     if processos == 1:
-        for item in itens:
-            yield exportar_item(item, op)
+        for item, pasta in zip(itens, pastas):
+            yield exportar_item(item, op, pasta)
         return
     # spawn em todas as plataformas: igual ao Windows e seguro com threads (OpenCV, servidor do painel)
     with ProcessPoolExecutor(max_workers=processos, mp_context=multiprocessing.get_context("spawn")) as pool:
-        yield from pool.map(exportar_item, itens, [op] * len(itens))
+        yield from pool.map(exportar_item, itens, [op] * len(itens), pastas)

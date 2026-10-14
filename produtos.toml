@@ -21,6 +21,14 @@ prensa_largura_cm = 120
 prensa_comprimento_cm = 200
 separar_por_transferencia = false  # true = subpastas calandra/ e prensa/ na pasta do RIP
 
+[rip]
+# Pastas monitoradas (hot folders) dos Setups do Flexi, por equipamento.
+# Cada Setup do Production Manager = impressora + mídia + perfil; ligue o
+# encaixe automático nele. Com mais de uma pasta, as peças são divididas
+# entre elas (ex.: as duas impressoras). Sem esta seção, use --saida.
+# prensa = ['\\PC-RIP\Flexi\Impressora1-Prensa', '\\PC-RIP\Flexi\Impressora2-Prensa']
+# calandra = ['\\PC-RIP\Flexi\Impressora1-Rolo']
+
 [os]
 # Ordens de serviço (clientes que mandam a arte pronta)
 pasta = "ordens"          # uma pasta por OS: ficha em PDF, os.json, planilha

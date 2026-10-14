@@ -45,9 +45,12 @@ def cmd_produtos(args: argparse.Namespace) -> int:
     return 0
 
 
-def _opcoes(args: argparse.Namespace, cfg) -> OpcoesExportacao:
+def _opcoes(args: argparse.Namespace, cfg, cat=None) -> OpcoesExportacao:
+    """--saida manda tudo para uma pasta; sem ela, usa as pastas do Flexi em [rip]."""
+    pastas_rip = {} if args.saida or cat is None else cat.pastas_rip
     return OpcoesExportacao(
-        saida=Path(args.saida), formato=args.formato, dpi=cfg.dpi, dpi_forcado=args.dpi,
+        saida=Path(args.saida or "saida"), pastas_rip=pastas_rip,
+        formato=args.formato, dpi=cfg.dpi, dpi_forcado=args.dpi,
         borda_mm=cfg.borda_mm, ampliador=args.ampliador, espelhar=_espelhar(args),
         rosto=cfg.enquadrar_rosto and not args.sem_rosto,
         separar_por_transferencia=cfg.separar_por_transferencia,
@@ -76,7 +79,8 @@ def _exportar(itens: list[ItemPedido], op: OpcoesExportacao, processos: int | No
         print(f"AVISO: {aviso}", file=sys.stderr)
     for erro in erros:
         print(f"ERRO: {erro}", file=sys.stderr)
-    print(f"{len(arquivos)} arquivo(s) em {op.saida} ({time.monotonic() - inicio:.1f}s)"
+    destinos = ", ".join(sorted({str(a.parent) for a in arquivos})) or str(op.saida)
+    print(f"{len(arquivos)} arquivo(s) em {destinos} ({time.monotonic() - inicio:.1f}s)"
           + (f", {len(erros)} item(ns) com erro" if erros else ""))
     return arquivos, avisos, erros
 
@@ -101,7 +105,7 @@ def cmd_peca(args: argparse.Namespace) -> int:
         lados.append(Lado(tuple(map(Path, args.verso)),
                           resolver_moldura(args.moldura_verso or "", Path.cwd(), cat), ajuste))
     item = ItemPedido(args.pedido, produto, args.quantidade, lados, equipamento)
-    return _relatorio([item], _opcoes(args, cat.config), processos=1)
+    return _relatorio([item], _opcoes(args, cat.config, cat), processos=1)
 
 
 def cmd_molduras(args: argparse.Namespace) -> int:
@@ -128,7 +132,7 @@ def cmd_os(args: argparse.Namespace) -> int:
     except ValueError:
         print(f"(número {numero} não utilizado)", file=sys.stderr)
         raise
-    op = _opcoes(args, cat.config)
+    op = _opcoes(args, cat.config, cat)
     arquivos, avisos_, erros = _exportar(itens, op, args.processos)
     _resumo_transferencia(itens)
     os_ = ordem.OrdemServico(
@@ -208,13 +212,13 @@ def cmd_lote(args: argparse.Namespace) -> int:
     cfg = cat.config
     itens = ler_pedidos_csv(args.csv, cat, transferencia=args.transferencia)
     if not args.montar_rolo:
-        return _relatorio(itens, _opcoes(args, cfg), args.processos)
+        return _relatorio(itens, _opcoes(args, cfg, cat), args.processos)
 
     largura = args.largura or cfg.largura_rolo_cm
     pecas, avisos = gerar_pecas(itens, cfg.dpi, criar_ampliador(args.ampliador), _espelhar(args), args.dpi,
                                 cfg.enquadrar_rosto and not args.sem_rosto)
     folhas = encaixar(pecas, largura, cfg.espaco_entre_pecas_cm, args.comprimento_max or cfg.comprimento_max_cm)
-    saida = Path(args.saida)
+    saida = Path(args.saida or "saida")
     saida.mkdir(parents=True, exist_ok=True)
     prefixo = Path(args.csv).stem
     total = 0.0
@@ -238,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("produtos", help="lista os produtos cadastrados").set_defaults(func=cmd_produtos)
 
     def opcoes_comuns(p: argparse.ArgumentParser) -> None:
-        p.add_argument("--saida", default="saida", help="pasta de saída (ex.: pasta monitorada do RIP)")
+        p.add_argument("--saida", help="pasta de saída única (padrão: pastas do Flexi em [rip], ou ./saida)")
         p.add_argument("--formato", choices=["png", "jpg", "pdf"], default="png",
                        help="png sem perdas (padrão), jpg qualidade 95 (mais rápido e leve) ou pdf")
         p.add_argument("--dpi", type=int, help="resolução de saída (padrão do catálogo/produto)")
