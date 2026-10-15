@@ -1,7 +1,10 @@
 # Estampa — arquivos de produção para personalizados
 
-Primeira fase do sistema de produção (planejamento completo em
-[docs/PLANEJAMENTO.md](docs/PLANEJAMENTO.md)).
+Primeira fase do sistema de produção. O documento que orienta o projeto é o
+**PRD** em [docs/PRD.md](docs/PRD.md) (a Parte A é para a dona da empresa; a
+Parte B, para quem programa). O que a revisão encontrou no código e no protótipo
+está em [docs/REVISAO.md](docs/REVISAO.md); o planejamento inicial, em
+[docs/PLANEJAMENTO.md](docs/PLANEJAMENTO.md).
 
 A partir da arte do cliente, gera o arquivo de impressão do jeito que hoje é
 feito no Corel:
